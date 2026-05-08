@@ -1,20 +1,18 @@
 """
-Jenkins API client — creates jobs, triggers builds, fetches status.
+Jenkins client using requests directly — avoids python-jenkins crumb issues.
 """
 import logging
-import xml.etree.ElementTree as ET
+import requests
+from requests.auth import HTTPBasicAuth
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-# Pipeline job config XML template
 JOB_CONFIG_XML = """<?xml version='1.1' encoding='UTF-8'?>
 <flow-definition plugin="workflow-job">
   <description>{description}</description>
-  <keepDependencies>false</keepDependencies>
-  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"
-              plugin="workflow-cps">
-    <script>{jenkinsfile}</script>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>{script}</script>
     <sandbox>true</sandbox>
   </definition>
   <triggers/>
@@ -24,106 +22,140 @@ JOB_CONFIG_XML = """<?xml version='1.1' encoding='UTF-8'?>
 
 class JenkinsClient:
     def __init__(self):
-        self.server = None
-        try:
-            import jenkins
-            self.server = jenkins.Jenkins(
-                settings.JENKINS_URL,
-                username=settings.JENKINS_USER,
-                password=settings.JENKINS_TOKEN,
-            )
-            self.server.get_version()
-            logger.info("Jenkins connected.")
-        except Exception as e:
-            logger.warning(f"Jenkins not available: {e}")
+        self.url   = settings.JENKINS_URL.rstrip('/')
+        self.auth  = HTTPBasicAuth(settings.JENKINS_USER, settings.JENKINS_TOKEN)
+        self._connected = None
 
     def is_connected(self):
-        return self.server is not None
+        if self._connected is None:
+            try:
+                r = requests.get(f"{self.url}/api/json",
+                                 auth=self.auth, timeout=5)
+                self._connected = r.status_code == 200
+            except Exception as e:
+                logger.warning(f"Jenkins connection failed: {e}")
+                self._connected = False
+        return self._connected
 
-    # ── Job management ─────────────────────────────────────────────────────
+    def _get_crumb(self):
+        """Get Jenkins crumb for CSRF protection."""
+        try:
+            r = requests.get(
+                f"{self.url}/crumbIssuer/api/json",
+                auth=self.auth, timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                return {data['crumbRequestField']: data['crumb']}
+        except Exception:
+            pass
+        return {}
+
+    def _headers(self):
+        h = {'Content-Type': 'application/xml'}
+        h.update(self._get_crumb())
+        return h
+
+    def job_exists(self, job_name: str) -> bool:
+        r = requests.get(
+            f"{self.url}/job/{job_name}/api/json",
+            auth=self.auth, timeout=5)
+        return r.status_code == 200
 
     def create_or_update_job(self, job_name: str, jenkinsfile: str,
                               description: str = '') -> bool:
-        """Create a new Pipeline job or update its Jenkinsfile."""
-        if not self.server:
-            logger.warning("Jenkins not connected — skipping job create.")
+        if not self.is_connected():
+            logger.warning("Jenkins not connected.")
             return False
         try:
+            # Escape XML special chars in jenkinsfile
+            safe_script = (jenkinsfile
+                           .replace('&', '&amp;')
+                           .replace('<', '&lt;')
+                           .replace('>', '&gt;'))
             config = JOB_CONFIG_XML.format(
                 description=description,
-                jenkinsfile=jenkinsfile.replace('&', '&amp;')
-                                       .replace('<', '&lt;')
-                                       .replace('>', '&gt;'),
-            )
-            if self.server.job_exists(job_name):
-                self.server.reconfig_job(job_name, config)
-                logger.info(f"Jenkins job '{job_name}' updated.")
+                script=safe_script)
+
+            if self.job_exists(job_name):
+                r = requests.post(
+                    f"{self.url}/job/{job_name}/config.xml",
+                    data=config.encode('utf-8'),
+                    auth=self.auth,
+                    headers=self._headers(),
+                    timeout=10)
+                action = "updated"
             else:
-                self.server.create_job(job_name, config)
-                logger.info(f"Jenkins job '{job_name}' created.")
-            return True
-        except Exception as e:
-            logger.error(f"Jenkins create/update job error: {e}")
-            return False
+                r = requests.post(
+                    f"{self.url}/createItem?name={job_name}",
+                    data=config.encode('utf-8'),
+                    auth=self.auth,
+                    headers=self._headers(),
+                    timeout=10)
+                action = "created"
 
-    def delete_job(self, job_name: str) -> bool:
-        if not self.server:
-            return False
-        try:
-            if self.server.job_exists(job_name):
-                self.server.delete_job(job_name)
-            return True
+            if r.status_code in (200, 201):
+                logger.info(f"Job '{job_name}' {action} successfully.")
+                return True
+            else:
+                logger.error(f"Jenkins {action} job failed: {r.status_code} {r.text[:200]}")
+                return False
         except Exception as e:
-            logger.error(f"Jenkins delete job error: {e}")
+            logger.error(f"Jenkins create/update error: {e}")
             return False
-
-    # ── Build management ───────────────────────────────────────────────────
 
     def trigger_build(self, job_name: str) -> dict:
-        """Trigger a build and return queue info."""
-        if not self.server:
-            return {'mock': True, 'build_number': 0}
+        if not self.is_connected():
+            return {'mock': True}
         try:
-            queue_id = self.server.build_job(job_name)
-            return {'queue_id': queue_id}
+            r = requests.post(
+                f"{self.url}/job/{job_name}/build",
+                auth=self.auth,
+                headers=self._get_crumb(),
+                timeout=10)
+            if r.status_code in (200, 201):
+                return {'status': 'queued'}
+            else:
+                raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
         except Exception as e:
             logger.error(f"Jenkins trigger error: {e}")
             raise
 
     def get_build_info(self, job_name: str, build_number: int) -> dict:
-        if not self.server:
-            return {}
         try:
-            return self.server.get_build_info(job_name, build_number)
-        except Exception as e:
-            logger.error(f"Jenkins build info error: {e}")
+            r = requests.get(
+                f"{self.url}/job/{job_name}/{build_number}/api/json",
+                auth=self.auth, timeout=5)
+            return r.json() if r.status_code == 200 else {}
+        except Exception:
             return {}
 
     def get_build_console(self, job_name: str, build_number: int) -> str:
-        if not self.server:
-            return "Jenkins non connecté."
         try:
-            return self.server.get_build_console_output(job_name, build_number)
-        except Exception as e:
-            logger.error(f"Jenkins console error: {e}")
+            r = requests.get(
+                f"{self.url}/job/{job_name}/{build_number}/consoleText",
+                auth=self.auth, timeout=10)
+            return r.text if r.status_code == 200 else ""
+        except Exception:
             return ""
 
     def abort_build(self, job_name: str, build_number: int) -> bool:
-        if not self.server:
-            return False
         try:
-            self.server.stop_build(job_name, build_number)
-            return True
-        except Exception as e:
-            logger.error(f"Jenkins abort error: {e}")
+            r = requests.post(
+                f"{self.url}/job/{job_name}/{build_number}/stop",
+                auth=self.auth,
+                headers=self._get_crumb(),
+                timeout=5)
+            return r.status_code in (200, 302)
+        except Exception:
             return False
 
-    def get_last_build_number(self, job_name: str):
-        if not self.server:
-            return None
+    def delete_job(self, job_name: str) -> bool:
         try:
-            info = self.server.get_job_info(job_name)
-            lb = info.get('lastBuild')
-            return lb['number'] if lb else None
+            r = requests.post(
+                f"{self.url}/job/{job_name}/doDelete",
+                auth=self.auth,
+                headers=self._get_crumb(),
+                timeout=5)
+            return r.status_code in (200, 302)
         except Exception:
-            return None
+            return False
