@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Vue d'ensemble{% endblock %}
+{% block content %}
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div><p class="text-muted small mb-1">Déploiements (7j)</p>
+          <h3 class="fw-bold mb-0">{{ total }}</h3></div>
+        <i class="bi bi-rocket-takeoff fs-1 text-primary opacity-25"></i>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card s p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div><p class="text-muted small mb-1">Taux de succès</p>
+          <h3 class="fw-bold mb-0" style="color:#0F6E56">{{ success_rate }}%</h3></div>
+        <i class="bi bi-check2-circle fs-1 opacity-25" style="color:#0F6E56"></i>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card d p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div><p class="text-muted small mb-1">Échecs (7j)</p>
+          <h3 class="fw-bold mb-0" style="color:#A32D2D">{{ failed }}</h3></div>
+        <i class="bi bi-x-circle fs-1 opacity-25" style="color:#A32D2D"></i>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card w p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div><p class="text-muted small mb-1">En cours</p>
+          <h3 class="fw-bold mb-0" style="color:#BA7517">{{ running }}</h3></div>
+        <i class="bi bi-arrow-repeat fs-1 opacity-25" style="color:#BA7517"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <!-- Chart -->
+  <div class="col-lg-8">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-bar-chart-fill me-2" style="color:#185FA5"></i>
+        Déploiements des 7 derniers jours
+      </h6>
+      <canvas id="chart" height="90"></canvas>
+    </div>
+  </div>
+  <!-- Notifications -->
+  <div class="col-lg-4">
+    <div class="card p-3 h-100">
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-bell-fill me-2" style="color:#BA7517"></i>Notifications
+      </h6>
+      {% for n in notifs %}
+      <div class="d-flex gap-2 mb-2 align-items-start">
+        <span class="badge bs-{{ n.type }} mt-1" style="font-size:.65rem;white-space:nowrap">{{ n.type }}</span>
+        <span class="small text-secondary">{{ n.message|truncatechars:65 }}</span>
+      </div>
+      {% empty %}
+      <p class="text-muted small">Aucune notification non lue.</p>
+      {% endfor %}
+      <a href="{% url 'notifications' %}" class="btn btn-sm btn-outline-secondary mt-auto w-100">
+        Voir tout <i class="bi bi-arrow-right"></i></a>
+    </div>
+  </div>
+</div>
+
+<!-- Projects + Recent deployments -->
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-semibold mb-0">
+          <i class="bi bi-folder2-open me-2" style="color:#185FA5"></i>Projets récents
+        </h6>
+        <a href="{% url 'project_create' %}" class="btn btn-sm"
+           style="background:#185FA5;color:#fff">
+          <i class="bi bi-plus"></i> Nouveau
+        </a>
+      </div>
+      {% for p in projects %}
+      <a href="{% url 'project_detail' p.pk %}" class="text-decoration-none">
+        <div class="d-flex justify-content-between align-items-center p-2 mb-1 rounded"
+             style="background:#F8F8F6;border:1px solid #e8e5de">
+          <div>
+            <div class="fw-semibold small">{{ p.name }}</div>
+            <div class="text-muted" style="font-size:.72rem">
+              <i class="bi bi-cloud me-1"></i>{{ p.cloud_provider }}
+              <i class="bi bi-git ms-2 me-1"></i>{{ p.branch }}
+            </div>
+          </div>
+          {% with d=p.get_last_deployment %}
+          <span class="badge bs-{% if d %}{{ d.status }}{% else %}NEVER_RUN{% endif %}">
+            {% if d %}{{ d.status }}{% else %}–{% endif %}
+          </span>
+          {% endwith %}
+        </div>
+      </a>
+      {% empty %}
+      <div class="text-center py-3 text-muted small">
+        <i class="bi bi-folder-plus fs-2 d-block mb-1"></i>
+        Aucun projet. <a href="{% url 'project_create' %}">Créer le premier</a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-clock-history me-2" style="color:#185FA5"></i>Déploiements récents
+      </h6>
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>#</th><th>Projet</th><th>Statut</th><th>Durée</th><th>Date</th></tr>
+        </thead>
+        <tbody>
+          {% for d in recent_deps %}
+          <tr>
+            <td><a href="{% url 'deployment_detail' d.pk %}" class="fw-semibold text-decoration-none">#{{ d.pk }}</a></td>
+            <td class="small">{{ d.project.name }}</td>
+            <td><span class="badge bs-{{ d.status }}">{{ d.status }}</span></td>
+            <td class="small text-muted">{{ d.duration|default:"..." }}</td>
+            <td class="small text-muted">{{ d.started_at|date:"d/m H:i" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="text-center text-muted py-3">Aucun déploiement.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+new Chart(document.getElementById('chart'), {
+  type: 'bar',
+  data: {
+    labels: {{ labels|safe }},
+    datasets: [
+      {label:'Succès', data:{{ s_data|safe }}, backgroundColor:'#0F6E56', borderRadius:4},
+      {label:'Échecs', data:{{ f_data|safe }}, backgroundColor:'#A32D2D', borderRadius:4},
+    ]
+  },
+  options:{responsive:true,
+    plugins:{legend:{position:'top'}},
+    scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}
+});
+</script>
+{% endblock %}

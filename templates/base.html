@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}CI/CD Platform{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root{--side:240px;--navy:#042C53;--blue:#185FA5;--teal:#0F6E56;--red:#A32D2D;--amber:#BA7517;}
+    body{background:#F1EFE8;font-family:'Segoe UI',sans-serif;margin:0;}
+    /* Sidebar */
+    .sidebar{position:fixed;top:0;left:0;width:var(--side);height:100vh;
+      background:var(--navy);display:flex;flex-direction:column;z-index:200;overflow-y:auto;}
+    .sidebar-brand{padding:1.1rem 1.2rem;border-bottom:1px solid #185FA5;
+      color:#B5D4F4;font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px;}
+    .sidebar .nav-link{color:#B5D4F4;padding:.5rem 1.1rem;border-radius:6px;
+      margin:2px 8px;font-size:.88rem;display:flex;align-items:center;gap:8px;}
+    .sidebar .nav-link:hover,.sidebar .nav-link.active{background:var(--blue);color:#fff;}
+    .sidebar .nav-section{color:#5a7a9a;font-size:.7rem;text-transform:uppercase;
+      letter-spacing:.08em;padding:.6rem 1.2rem .2rem;margin-top:.3rem;}
+    /* Main */
+    .main{margin-left:var(--side);min-height:100vh;display:flex;flex-direction:column;}
+    .topbar{background:#fff;border-bottom:1px solid #e0ddd5;padding:.65rem 1.5rem;
+      display:flex;align-items:center;justify-content:space-between;
+      box-shadow:0 1px 3px rgba(0,0,0,.06);}
+    .content{padding:1.5rem;flex:1;}
+    /* Cards */
+    .card{border:none;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);}
+    .stat-card{border-left:4px solid var(--blue);}
+    .stat-card.s{border-left-color:var(--teal);}
+    .stat-card.d{border-left-color:var(--red);}
+    .stat-card.w{border-left-color:var(--amber);}
+    /* Status badges */
+    .bs-SUCCESS {background:#0F6E56 !important;}
+    .bs-FAILED  {background:#A32D2D !important;}
+    .bs-RUNNING {background:#185FA5 !important;animation:pulse 1.5s infinite;}
+    .bs-PENDING {background:#BA7517 !important;}
+    .bs-CANCELLED{background:#5F5E5A !important;}
+    .bs-NEVER_RUN{background:#888 !important;}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.65}}
+    /* Stage progress */
+    .stage-row{display:flex;align-items:center;gap:10px;padding:6px 0;
+      border-bottom:1px solid #f0ede6;}
+    .stage-row:last-child{border-bottom:none;}
+    .stage-icon{width:28px;height:28px;border-radius:50%;display:flex;
+      align-items:center;justify-content:center;font-size:.75rem;color:#fff;flex-shrink:0;}
+    .stage-icon.SUCCESS {background:#0F6E56;}
+    .stage-icon.FAILED  {background:#A32D2D;}
+    .stage-icon.RUNNING {background:#185FA5;}
+    .stage-icon.PENDING {background:#ccc;}
+    .stage-icon.SKIPPED {background:#888;}
+    /* Log console */
+    .log-console{background:#1a1b26;border-radius:8px;padding:12px 14px;
+      max-height:420px;overflow-y:auto;font-family:'Courier New',monospace;font-size:.78rem;}
+    .log-line{padding:1px 0;line-height:1.5;}
+    .log-INFO   {color:#cdd6f4;}
+    .log-SUCCESS{color:#a6e3a1;}
+    .log-WARNING{color:#f9e2af;}
+    .log-ERROR  {color:#f38ba8;}
+    .log-ts     {color:#6c7086;margin-right:8px;}
+    .log-lv     {margin-right:8px;font-weight:700;}
+    /* Form sections */
+    .form-section{background:#fff;border-radius:10px;padding:1.2rem 1.4rem;
+      margin-bottom:1rem;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+    .form-section-title{font-size:.8rem;font-weight:700;text-transform:uppercase;
+      letter-spacing:.06em;color:var(--blue);margin-bottom:.9rem;
+      padding-bottom:.4rem;border-bottom:2px solid #B5D4F4;}
+    /* Jenkinsfile preview */
+    .jf-box{background:#1a1b26;border-radius:8px;padding:12px;
+      font-family:'Courier New',monospace;font-size:.73rem;color:#cdd6f4;
+      max-height:340px;overflow-y:auto;white-space:pre;}
+    /* Avatar */
+    .avatar{width:30px;height:30px;border-radius:50%;background:var(--blue);
+      color:#fff;display:flex;align-items:center;justify-content:center;
+      font-size:.75rem;font-weight:700;}
+  </style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <i class="bi bi-cloud-upload-fill"></i> CI/CD Platform
+  </div>
+  <nav class="nav flex-column mt-2 flex-grow-1">
+    <div class="nav-section">Général</div>
+    <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+       href="{% url 'dashboard' %}">
+      <i class="bi bi-speedometer2"></i> Dashboard</a>
+
+    <div class="nav-section">Projets</div>
+    <a class="nav-link {% if 'project' in request.resolver_match.url_name|default:'' %}active{% endif %}"
+       href="{% url 'project_list' %}">
+      <i class="bi bi-folder2-open"></i> Mes projets</a>
+    <a class="nav-link" href="{% url 'project_create' %}">
+      <i class="bi bi-plus-circle"></i> Nouveau projet</a>
+
+    <div class="nav-section">Activité</div>
+    <a class="nav-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}"
+       href="{% url 'notifications' %}">
+      <i class="bi bi-bell"></i> Notifications
+      {% with count=request.user.unread_notifications_count %}
+      {% if count %}<span class="badge bg-danger ms-auto">{{ count }}</span>{% endif %}
+      {% endwith %}
+    </a>
+
+    {% if request.user.role == 'admin' %}
+    <div class="nav-section">Admin</div>
+    <a class="nav-link" href="/admin/"><i class="bi bi-gear"></i> Administration</a>
+    {% endif %}
+  </nav>
+  <div style="padding:.8rem 1rem;border-top:1px solid #185FA5;color:#5a7a9a;font-size:.75rem;">
+    v1.0 — PFA 2024/2025
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar">
+    <span class="fw-semibold text-secondary" style="font-size:.92rem">
+      {% block page_title %}Dashboard{% endblock %}
+    </span>
+    <div class="d-flex align-items-center gap-3">
+      <a href="{% url 'notifications' %}" class="text-decoration-none text-secondary position-relative">
+        <i class="bi bi-bell fs-5"></i>
+        {% with count=request.user.unread_notifications_count %}
+        {% if count %}
+        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+              style="font-size:.6rem">{{ count }}</span>
+        {% endif %}
+        {% endwith %}
+      </a>
+      <div class="avatar">{{ request.user.avatar_initials }}</div>
+      <span class="text-secondary small">{{ request.user.username }}
+        <span class="badge bg-secondary ms-1">{{ request.user.role }}</span>
+      </span>
+      <a href="{% url 'logout' %}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-box-arrow-right"></i>
+      </a>
+    </div>
+  </div>
+
+  <div class="content">
+    {% if messages %}
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+      {{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

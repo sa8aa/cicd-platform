@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Supprimer {{ project.name }}{% endblock %}
+{% block page_title %}Supprimer le projet{% endblock %}
+{% block content %}
+<div class="card p-4" style="max-width:500px;margin:auto">
+  <h5 class="text-danger mb-3"><i class="bi bi-exclamation-triangle me-2"></i>Confirmer la suppression</h5>
+  <p>Vous allez supprimer le projet <strong>{{ project.name }}</strong> et tous ses déploiements associés.</p>
+  <p class="text-muted small">Le job Jenkins <code>{{ project.jenkins_job_name }}</code> sera également supprimé.</p>
+  <div class="d-flex gap-2 mt-3">
+    <form method="post">{% csrf_token %}
+      <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Supprimer</button>
+    </form>
+    <a href="{% url 'project_detail' project.pk %}" class="btn btn-outline-secondary">Annuler</a>
+  </div>
+</div>
+{% endblock %}

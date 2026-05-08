@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }}{% endblock %}
+{% block page_title %}{{ project.name }}{% endblock %}
+{% block content %}
+
+<div class="d-flex gap-2 mb-3">
+  <form method="post" action="{% url 'project_deploy' project.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="btn fw-semibold"
+            style="background:#0F6E56;color:#fff">
+      <i class="bi bi-rocket-takeoff me-2"></i>Déclencher un déploiement
+    </button>
+  </form>
+  <a href="{% url 'project_edit' project.pk %}" class="btn btn-outline-primary">
+    <i class="bi bi-pencil me-1"></i>Modifier</a>
+  <a href="{% url 'jenkinsfile_download' project.pk %}" class="btn btn-outline-secondary">
+    <i class="bi bi-download me-1"></i>Jenkinsfile</a>
+  <a href="{% url 'project_delete' project.pk %}" class="btn btn-outline-danger ms-auto">
+    <i class="bi bi-trash"></i></a>
+</div>
+
+<div class="row g-3 mb-3">
+  <!-- Config info -->
+  <div class="col-md-5">
+    <div class="card p-3 h-100">
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-gear me-2" style="color:#185FA5"></i>Configuration
+      </h6>
+      <table class="table table-sm table-borderless mb-0">
+        <tr><th class="text-muted" style="width:130px;font-size:.82rem">Dépôt</th>
+            <td class="small"><a href="{{ project.repo_url }}" target="_blank">{{ project.repo_url }}</a></td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Branche</th>
+            <td><code>{{ project.branch }}</code></td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Cloud</th>
+            <td><span class="badge bg-primary">{{ project.cloud_provider }}</span>
+                <span class="ms-1 small text-muted">{{ project.aws_region }}</span></td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Environnement</th>
+            <td><span class="badge bg-secondary">{{ project.environment }}</span></td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Image Docker</th>
+            <td><code class="small">{{ project.image_name }}</code></td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">ECR Repo</th>
+            <td><code class="small" style="font-size:.7rem">{{ project.ecr_repo }}</code></td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Stack CF</th>
+            <td class="small">{{ project.cf_stack_name }}</td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Key Pair</th>
+            <td class="small">{{ project.aws_key_name }}</td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Port App</th>
+            <td class="small">{{ project.app_port }}</td></tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Jenkins Job</th>
+            <td>
+              <code class="small">{{ project.jenkins_job_name }}</code>
+              {% if project.jenkins_created %}
+              <span class="badge ms-1" style="background:#0F6E56;font-size:.65rem">créé ✓</span>
+              {% else %}
+              <span class="badge ms-1 bg-warning text-dark" style="font-size:.65rem">en attente</span>
+              {% endif %}
+            </td>
+        </tr>
+        <tr><th class="text-muted" style="font-size:.82rem">Succès</th>
+            <td class="fw-bold" style="color:#0F6E56">{{ project.get_success_rate }}%</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Jenkinsfile preview -->
+  <div class="col-md-7">
+    <div class="card p-3 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="fw-semibold mb-0">
+          <i class="bi bi-file-code me-2" style="color:#185FA5"></i>Jenkinsfile généré
+        </h6>
+        <a href="{% url 'jenkinsfile_download' project.pk %}"
+           class="btn btn-sm btn-outline-secondary">
+          <i class="bi bi-download me-1"></i>Télécharger
+        </a>
+      </div>
+      <div class="jf-box">{{ jenkinsfile }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Deployments history -->
+<div class="card p-3">
+  <h6 class="fw-semibold mb-3">
+    <i class="bi bi-clock-history me-2" style="color:#185FA5"></i>Historique des déploiements
+  </h6>
+  <table class="table table-sm table-hover mb-0">
+    <thead class="table-light">
+      <tr><th>#</th><th>Statut</th><th>Commit</th><th>Durée</th>
+          <th>Déclenché par</th><th>Date</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for d in deployments %}
+      <tr>
+        <td><a href="{% url 'deployment_detail' d.pk %}" class="fw-semibold text-decoration-none">#{{ d.pk }}</a></td>
+        <td><span class="badge bs-{{ d.status }}">{{ d.status }}</span></td>
+        <td><code class="small">{{ d.commit_sha|truncatechars:8|default:"–" }}</code></td>
+        <td class="small text-muted">{{ d.duration|default:"..." }}</td>
+        <td class="small text-muted">{{ d.triggered_by.username|default:"auto" }}</td>
+        <td class="small text-muted">{{ d.started_at|date:"d/m/Y H:i" }}</td>
+        <td><a href="{% url 'deployment_detail' d.pk %}" class="btn btn-sm btn-outline-secondary py-0">
+          <i class="bi bi-eye"></i></a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center text-muted py-4">
+        Aucun déploiement. Cliquez sur « Déclencher » pour commencer.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

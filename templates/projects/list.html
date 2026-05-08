@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Mes projets{% endblock %}
+{% block page_title %}Mes projets{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <span class="text-muted small">{{ projects.count }} projet(s)</span>
+  <a href="{% url 'project_create' %}" class="btn btn-sm fw-semibold"
+     style="background:#185FA5;color:#fff">
+    <i class="bi bi-plus-circle me-1"></i>Nouveau projet
+  </a>
+</div>
+
+{% if projects %}
+<div class="row g-3">
+  {% for p in projects %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card p-3 h-100">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <h6 class="fw-bold mb-0">{{ p.name }}</h6>
+        {% with d=p.get_last_deployment %}
+        <span class="badge bs-{% if d %}{{ d.status }}{% else %}NEVER_RUN{% endif %}">
+          {% if d %}{{ d.status }}{% else %}Jamais déployé{% endif %}
+        </span>
+        {% endwith %}
+      </div>
+      <p class="text-muted small mb-2">{{ p.description|truncatechars:75 }}</p>
+
+      <div class="d-flex flex-wrap gap-1 mb-3">
+        <span class="badge bg-light text-dark border">
+          <i class="bi bi-cloud me-1"></i>{{ p.cloud_provider }}</span>
+        <span class="badge bg-light text-dark border">
+          <i class="bi bi-git me-1"></i>{{ p.branch }}</span>
+        <span class="badge bg-light text-dark border">
+          <i class="bi bi-box me-1"></i>{{ p.environment }}</span>
+        {% if p.jenkins_created %}
+        <span class="badge" style="background:#0F6E56">
+          <i class="bi bi-check2 me-1"></i>Jenkins OK</span>
+        {% else %}
+        <span class="badge" style="background:#BA7517">
+          <i class="bi bi-exclamation me-1"></i>Jenkins en attente</span>
+        {% endif %}
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mt-auto">
+        <span class="small text-muted">
+          <i class="bi bi-graph-up me-1"></i>{{ p.get_success_rate }}% succès
+        </span>
+        <div class="d-flex gap-1">
+          <a href="{% url 'project_detail' p.pk %}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-eye"></i></a>
+          <form method="post" action="{% url 'project_deploy' p.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm"
+                    style="background:#0F6E56;color:#fff"
+                    title="Déclencher un déploiement">
+              <i class="bi bi-rocket-takeoff"></i></button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card p-5 text-center">
+  <i class="bi bi-folder-plus fs-1 text-muted mb-3 d-block"></i>
+  <h5 class="text-muted">Aucun projet</h5>
+  <p class="text-muted small">Commencez par créer votre premier projet de déploiement.</p>
+  <a href="{% url 'project_create' %}" class="btn mx-auto"
+     style="background:#185FA5;color:#fff;width:fit-content">
+    <i class="bi bi-plus-circle me-2"></i>Créer mon premier projet
+  </a>
+</div>
+{% endif %}
+{% endblock %}
