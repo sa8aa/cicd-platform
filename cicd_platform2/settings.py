@@ -81,7 +81,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 # Jenkins
 JENKINS_URL   = 'http://localhost:8080'
 JENKINS_USER  = 'admin'
-JENKINS_TOKEN = 'change-me'
+JENKINS_TOKEN = '11e0436b1ae07382d31e410883603159ee'
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
