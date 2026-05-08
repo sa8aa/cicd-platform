@@ -32,7 +32,7 @@ class JenkinsClient:
                 username=settings.JENKINS_USER,
                 password=settings.JENKINS_TOKEN,
             )
-            self.server.get_whoami()   # test connection
+            self.server.get_version()
             logger.info("Jenkins connected.")
         except Exception as e:
             logger.warning(f"Jenkins not available: {e}")
