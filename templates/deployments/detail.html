@@ -23,11 +23,16 @@
 </div>
 
 <div class="row g-3 mb-3">
+
+  <!-- Info card -->
   <div class="col-md-4">
     <div class="card p-3 h-100">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-info-circle me-2" style="color:#185FA5"></i>Informations</h6>
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-info-circle me-2" style="color:#185FA5"></i>Informations
+      </h6>
       <div class="mb-2 text-center">
-        <span class="badge bs-{{ deployment.status }} px-3 py-2" style="font-size:.9rem">{{ deployment.status }}</span>
+        <span id="status-badge" class="badge bs-{{ deployment.status }} px-3 py-2"
+              style="font-size:.9rem">{{ deployment.status }}</span>
       </div>
       <table class="table table-sm table-borderless mt-2 mb-0">
         <tr><th class="text-muted" style="font-size:.8rem;width:110px">Projet</th>
@@ -39,111 +44,382 @@
         <tr><th class="text-muted" style="font-size:.8rem">Build Jenkins</th>
             <td class="small">#{{ deployment.jenkins_build_number|default:"–" }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Durée</th>
-            <td class="small fw-semibold">{{ deployment.duration|default:"En cours..." }}</td></tr>
+            <td class="small fw-semibold" id="duration-cell">{{ deployment.duration|default:"En cours..." }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Démarré</th>
             <td class="small">{{ deployment.started_at|date:"d/m/Y H:i:s" }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Terminé</th>
-            <td class="small">{{ deployment.finished_at|date:"d/m/Y H:i:s"|default:"–" }}</td></tr>
+            <td class="small" id="finished-cell">{{ deployment.finished_at|date:"d/m/Y H:i:s"|default:"–" }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Par</th>
             <td class="small">{{ deployment.triggered_by.username|default:"auto" }}</td></tr>
       </table>
       {% if deployment.error_message %}
-      <div class="alert alert-danger mt-2 py-2 small"><strong>Erreur:</strong> {{ deployment.error_message }}</div>
+      <div class="alert alert-danger mt-2 py-2 small">
+        <strong>Erreur:</strong> {{ deployment.error_message }}
+      </div>
       {% endif %}
     </div>
   </div>
 
+  <!-- Stages card -->
   <div class="col-md-4">
     <div class="card p-3 h-100">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-diagram-3 me-2" style="color:#185FA5"></i>Stages Jenkins</h6>
-      {% for s in stages %}
-      <div class="stage-row">
-        <div class="stage-icon {{ s.status }}">
-          {% if s.status == 'SUCCESS' %}<i class="bi bi-check2"></i>
-          {% elif s.status == 'FAILED' %}<i class="bi bi-x"></i>
-          {% elif s.status == 'RUNNING' %}<i class="bi bi-arrow-repeat"></i>
-          {% else %}<i class="bi bi-clock"></i>{% endif %}
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-diagram-3 me-2" style="color:#185FA5"></i>Stages Jenkins
+      </h6>
+      <div id="stages-container">
+        {% for s in stages %}
+        <div class="stage-row" id="stage-{{ s.name|slugify }}">
+          <div class="stage-icon {{ s.status }}" id="stage-icon-{{ s.name|slugify }}">
+            {% if s.status == 'SUCCESS' %}<i class="bi bi-check2"></i>
+            {% elif s.status == 'FAILED' %}<i class="bi bi-x"></i>
+            {% elif s.status == 'RUNNING' %}<i class="bi bi-arrow-repeat"></i>
+            {% else %}<i class="bi bi-clock"></i>{% endif %}
+          </div>
+          <div class="flex-grow-1">
+            <div class="small fw-semibold">{{ s.name }}</div>
+            <div class="text-muted" style="font-size:.72rem">{{ s.duration|default:"–" }}</div>
+          </div>
+          <span class="badge bs-{{ s.status }}" style="font-size:.65rem"
+                id="stage-badge-{{ s.name|slugify }}">{{ s.status }}</span>
         </div>
-        <div class="flex-grow-1">
-          <div class="small fw-semibold">{{ s.name }}</div>
-          <div class="text-muted" style="font-size:.72rem">{{ s.duration|default:"–" }}</div>
-        </div>
-        <span class="badge bs-{{ s.status }}" style="font-size:.65rem">{{ s.status }}</span>
+        {% empty %}
+        <p class="text-muted small mt-2" id="stages-empty">En attente du webhook Jenkins...</p>
+        {% endfor %}
       </div>
-      {% empty %}
-      <p class="text-muted small mt-2">En attente du webhook Jenkins...</p>
-      {% endfor %}
     </div>
   </div>
 
+  <!-- Live status card -->
   <div class="col-md-4">
     <div class="card p-3 h-100">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-activity me-2" style="color:#185FA5"></i>Statut live</h6>
-      {% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
-      <div class="text-center py-3">
-        <div class="spinner-border text-primary mb-3"></div>
-        <p class="text-muted small">Pipeline en cours...<br>Rafraîchissement dans <span id="timer">5</span>s</p>
-      </div>
-      {% elif deployment.status == 'SUCCESS' %}
-      <div class="text-center py-3">
-        <i class="bi bi-check-circle-fill fs-1" style="color:#0F6E56"></i>
-        <p class="mt-2 fw-semibold" style="color:#0F6E56">Déploiement réussi !</p>
-        {% if deployment.project.app_port %}
-        <p class="text-muted small">Port applicatif: <code>{{ deployment.project.app_port }}</code></p>
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-activity me-2" style="color:#185FA5"></i>Statut live
+      </h6>
+      <div id="live-status">
+        {% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
+        <div class="text-center py-3">
+          <div class="spinner-border text-primary mb-3"></div>
+          <p class="text-muted small">Pipeline en cours...<br>
+            <span id="sse-indicator" class="badge bg-success" style="font-size:.65rem">
+              <i class="bi bi-broadcast me-1"></i>Streaming live
+            </span>
+          </p>
+        </div>
+        {% elif deployment.status == 'SUCCESS' %}
+        <div class="text-center py-3">
+          <i class="bi bi-check-circle-fill fs-1" style="color:#0F6E56"></i>
+          <p class="mt-2 fw-semibold" style="color:#0F6E56">Déploiement réussi !</p>
+          {% if deployment.project.app_port %}
+          <p class="text-muted small">Port: <code>{{ deployment.project.app_port }}</code></p>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="text-center py-3">
+          <i class="bi bi-x-circle-fill fs-1" style="color:#A32D2D"></i>
+          <p class="mt-2 fw-semibold" style="color:#A32D2D">{{ deployment.status }}</p>
+        </div>
         {% endif %}
       </div>
-      {% else %}
-      <div class="text-center py-3">
-        <i class="bi bi-x-circle-fill fs-1" style="color:#A32D2D"></i>
-        <p class="mt-2 fw-semibold" style="color:#A32D2D">{{ deployment.status }}</p>
-      </div>
-      {% endif %}
     </div>
   </div>
 </div>
 
-<!-- Logs -->
+<!-- Console -->
 <div class="card p-3">
   <div class="d-flex justify-content-between align-items-center mb-2">
-    <h6 class="fw-semibold mb-0"><i class="bi bi-terminal me-2" style="color:#185FA5"></i>Console</h6>
-    <div class="btn-group btn-group-sm" id="logFilter">
-      <button class="btn btn-outline-secondary active" data-level="ALL">Tous</button>
-      <button class="btn btn-outline-secondary" data-level="INFO">INFO</button>
-      <button class="btn btn-outline-secondary" data-level="WARNING">WARN</button>
-      <button class="btn btn-outline-secondary" data-level="ERROR">ERROR</button>
-      <button class="btn btn-outline-secondary" data-level="SUCCESS">OK</button>
+    <h6 class="fw-semibold mb-0">
+      <i class="bi bi-terminal me-2" style="color:#185FA5"></i>Console
+      <span id="log-count" class="badge bg-secondary ms-1" style="font-size:.65rem">
+        {{ logs.count }} lignes
+      </span>
+    </h6>
+    <div class="d-flex gap-2 align-items-center">
+      <!-- Auto-scroll toggle -->
+      <div class="form-check form-switch mb-0 me-1">
+        <input class="form-check-input" type="checkbox" id="autoscroll" checked>
+        <label class="form-check-label small text-muted" for="autoscroll">Auto-scroll</label>
+      </div>
+      <!-- Level filter -->
+      <div class="btn-group btn-group-sm" id="logFilter">
+        <button class="btn btn-outline-secondary active" data-level="ALL">Tous</button>
+        <button class="btn btn-outline-secondary" data-level="INFO">INFO</button>
+        <button class="btn btn-outline-secondary" data-level="WARNING">WARN</button>
+        <button class="btn btn-outline-secondary" data-level="ERROR">ERROR</button>
+        <button class="btn btn-outline-secondary" data-level="SUCCESS">OK</button>
+      </div>
+      <!-- Jenkins source toggle (shown only when Jenkins lines arrive) -->
+      <div class="form-check form-switch mb-0 ms-1 d-none" id="jenkins-toggle-wrap">
+        <input class="form-check-input" type="checkbox" id="show-jenkins" checked>
+        <label class="form-check-label small text-muted" for="show-jenkins">Jenkins</label>
+      </div>
+      <!-- Clear button -->
+      <button class="btn btn-sm btn-outline-secondary" onclick="clearConsole()">
+        <i class="bi bi-trash"></i>
+      </button>
     </div>
   </div>
   <div class="log-console" id="logBox">
     {% for log in logs %}
-    <div class="log-line log-{{ log.level }}" data-level="{{ log.level }}">
+    <div class="log-line log-{{ log.level }}" data-level="{{ log.level }}" data-source="db">
       <span class="log-ts">{{ log.timestamp|date:"H:i:s" }}</span>
       <span class="log-lv">[{{ log.level }}]</span>{{ log.message }}
     </div>
     {% empty %}
-    <div class="log-line log-INFO">En attente des logs Jenkins...</div>
+    <div class="log-line log-INFO" data-level="INFO" data-source="db">
+      En attente des logs Jenkins...
+    </div>
     {% endfor %}
   </div>
 </div>
+
 {% endblock %}
+
 {% block extra_js %}
 <script>
-document.querySelectorAll('#logFilter button').forEach(btn=>{
-  btn.addEventListener('click',function(){
-    document.querySelectorAll('#logFilter button').forEach(b=>b.classList.remove('active'));
+// ── Constants ──────────────────────────────────────────────────────────────
+const DEPLOYMENT_PK  = {{ deployment.pk }};
+const INITIAL_STATUS = '{{ deployment.status }}';
+const STREAM_URL     = '{% url "deployment_stream" deployment.pk %}';
+
+// ── DOM refs ───────────────────────────────────────────────────────────────
+const logBox       = document.getElementById('logBox');
+const logCount     = document.getElementById('log-count');
+const statusBadge  = document.getElementById('status-badge');
+const liveStatus   = document.getElementById('live-status');
+const sseIndicator = document.getElementById('sse-indicator');
+const autoscroll   = document.getElementById('autoscroll');
+const showJenkins  = document.getElementById('show-jenkins');
+const jenkinsWrap  = document.getElementById('jenkins-toggle-wrap');
+
+let lineCount     = logBox.querySelectorAll('.log-line').length;
+let activeFilter  = 'ALL';
+let jenkinsVisible = true;
+let eventSource   = null;
+
+// ── Scroll to bottom ───────────────────────────────────────────────────────
+function scrollToBottom() {
+  if (autoscroll && autoscroll.checked) {
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+}
+scrollToBottom();
+
+// ── Log filter ─────────────────────────────────────────────────────────────
+document.querySelectorAll('#logFilter button').forEach(btn => {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('#logFilter button').forEach(b => b.classList.remove('active'));
     this.classList.add('active');
-    const lv=this.dataset.level;
-    document.querySelectorAll('.log-line').forEach(l=>{
-      l.style.display=(lv==='ALL'||l.dataset.level===lv)?'':'none';
-    });
+    activeFilter = this.dataset.level;
+    applyFilters();
   });
 });
-const lb=document.getElementById('logBox');
-if(lb) lb.scrollTop=lb.scrollHeight;
-{% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
-let t=5;
-const ti=document.getElementById('timer');
-setInterval(()=>{t--;if(ti)ti.textContent=t;if(t<=0)location.reload();},1000);
-{% endif %}
+
+if (showJenkins) {
+  showJenkins.addEventListener('change', function () {
+    jenkinsVisible = this.checked;
+    applyFilters();
+  });
+}
+
+function applyFilters() {
+  document.querySelectorAll('.log-line').forEach(line => {
+    const levelOk   = (activeFilter === 'ALL' || line.dataset.level === activeFilter);
+    const sourceOk  = (line.dataset.source !== 'jenkins' || jenkinsVisible);
+    line.style.display = (levelOk && sourceOk) ? '' : 'none';
+  });
+}
+
+// ── Add a log line to the console ──────────────────────────────────────────
+function addLogLine(data) {
+  // Remove "waiting" placeholder if present
+  const placeholder = logBox.querySelector('[data-source="db"].log-INFO');
+  if (placeholder && placeholder.textContent.includes('En attente')) {
+    placeholder.remove();
+  }
+
+  const div = document.createElement('div');
+  div.className = `log-line ${data.css_class}`;
+  div.dataset.level  = data.level;
+  div.dataset.source = data.source || 'db';
+
+  const ts  = document.createElement('span');
+  ts.className = 'log-ts';
+  ts.textContent = data.timestamp;
+
+  const lv  = document.createElement('span');
+  lv.className = 'log-lv';
+  lv.textContent = `[${data.level}]`;
+
+  div.appendChild(ts);
+  div.appendChild(lv);
+  div.appendChild(document.createTextNode(data.message));
+
+  // Apply current filters immediately
+  const levelOk  = (activeFilter === 'ALL' || data.level === activeFilter);
+  const sourceOk = (data.source !== 'jenkins' || jenkinsVisible);
+  if (!levelOk || !sourceOk) div.style.display = 'none';
+
+  // Show Jenkins toggle if we have jenkins lines
+  if (data.source === 'jenkins' && jenkinsWrap) {
+    jenkinsWrap.classList.remove('d-none');
+  }
+
+  logBox.appendChild(div);
+  lineCount++;
+  logCount.textContent = `${lineCount} lignes`;
+  scrollToBottom();
+}
+
+// ── Update stages ──────────────────────────────────────────────────────────
+const STAGE_ICONS = {
+  SUCCESS:  '<i class="bi bi-check2"></i>',
+  FAILED:   '<i class="bi bi-x"></i>',
+  RUNNING:  '<i class="bi bi-arrow-repeat"></i>',
+  PENDING:  '<i class="bi bi-clock"></i>',
+  SKIPPED:  '<i class="bi bi-skip-forward"></i>',
+};
+
+function slugify(str) {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+function updateStages(stages) {
+  const container = document.getElementById('stages-container');
+  const empty     = document.getElementById('stages-empty');
+  if (empty) empty.remove();
+
+  stages.forEach(s => {
+    const slug = slugify(s.name);
+    let row = document.getElementById(`stage-${slug}`);
+
+    if (!row) {
+      // Build the row from scratch
+      row = document.createElement('div');
+      row.className = 'stage-row';
+      row.id = `stage-${slug}`;
+      row.innerHTML = `
+        <div class="stage-icon ${s.status}" id="stage-icon-${slug}">
+          ${STAGE_ICONS[s.status] || STAGE_ICONS.PENDING}
+        </div>
+        <div class="flex-grow-1">
+          <div class="small fw-semibold">${s.name}</div>
+          <div class="text-muted" style="font-size:.72rem">–</div>
+        </div>
+        <span class="badge bs-${s.status}" style="font-size:.65rem"
+              id="stage-badge-${slug}">${s.status}</span>
+      `;
+      container.appendChild(row);
+    } else {
+      // Update existing row
+      const icon  = document.getElementById(`stage-icon-${slug}`);
+      const badge = document.getElementById(`stage-badge-${slug}`);
+      if (icon) {
+        icon.className = `stage-icon ${s.status}`;
+        icon.innerHTML = STAGE_ICONS[s.status] || STAGE_ICONS.PENDING;
+      }
+      if (badge) {
+        badge.className = `badge bs-${s.status}`;
+        badge.style.fontSize = '.65rem';
+        badge.textContent = s.status;
+      }
+    }
+  });
+}
+
+// ── Update overall status UI ───────────────────────────────────────────────
+function updateStatus(status) {
+  // Badge
+  if (statusBadge) {
+    statusBadge.className = `badge bs-${status} px-3 py-2`;
+    statusBadge.style.fontSize = '.9rem';
+    statusBadge.textContent = status;
+  }
+
+  // Live status card
+  if (status === 'SUCCESS') {
+    liveStatus.innerHTML = `
+      <div class="text-center py-3">
+        <i class="bi bi-check-circle-fill fs-1" style="color:#0F6E56"></i>
+        <p class="mt-2 fw-semibold" style="color:#0F6E56">Déploiement réussi !</p>
+      </div>`;
+  } else if (status === 'FAILED') {
+    liveStatus.innerHTML = `
+      <div class="text-center py-3">
+        <i class="bi bi-x-circle-fill fs-1" style="color:#A32D2D"></i>
+        <p class="mt-2 fw-semibold" style="color:#A32D2D">Déploiement échoué</p>
+      </div>`;
+  } else if (status === 'CANCELLED') {
+    liveStatus.innerHTML = `
+      <div class="text-center py-3">
+        <i class="bi bi-slash-circle-fill fs-1 text-secondary"></i>
+        <p class="mt-2 fw-semibold text-secondary">Annulé</p>
+      </div>`;
+  }
+}
+
+// ── SSE connection ─────────────────────────────────────────────────────────
+function clearConsole() {
+  logBox.innerHTML = '';
+  lineCount = 0;
+  logCount.textContent = '0 lignes';
+}
+
+function connectSSE() {
+  if (eventSource) eventSource.close();
+
+  eventSource = new EventSource(STREAM_URL);
+
+  // SSE connected — show indicator
+  if (sseIndicator) {
+    sseIndicator.className = 'badge bg-success';
+    sseIndicator.innerHTML = '<i class="bi bi-broadcast me-1"></i>Streaming live';
+  }
+
+  eventSource.addEventListener('log', e => {
+    const data = JSON.parse(e.data);
+    addLogLine(data);
+  });
+
+  eventSource.addEventListener('stage', e => {
+    const data = JSON.parse(e.data);
+    updateStages(data.stages);
+  });
+
+  eventSource.addEventListener('status', e => {
+    const data = JSON.parse(e.data);
+    updateStatus(data.status);
+  });
+
+  eventSource.addEventListener('done', e => {
+    // Stream closed by server — deployment finished
+    eventSource.close();
+    if (sseIndicator) {
+      sseIndicator.className = 'badge bg-secondary';
+      sseIndicator.innerHTML = '<i class="bi bi-check2 me-1"></i>Terminé';
+    }
+  });
+
+  eventSource.onerror = () => {
+    // Connection lost — show reconnect indicator and retry after 3s
+    if (sseIndicator) {
+      sseIndicator.className = 'badge bg-warning text-dark';
+      sseIndicator.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Reconnexion...';
+    }
+    eventSource.close();
+    // Only reconnect if deployment might still be running
+    if (INITIAL_STATUS === 'RUNNING' || INITIAL_STATUS === 'PENDING') {
+      setTimeout(connectSSE, 3000);
+    }
+  };
+}
+
+// ── Start SSE only for active deployments ──────────────────────────────────
+if (INITIAL_STATUS === 'RUNNING' || INITIAL_STATUS === 'PENDING') {
+  clearConsole();   // Clear pre-rendered logs — SSE will replay them fresh
+  connectSSE();
+} else {
+  // Static deployment — just scroll to bottom
+  scrollToBottom();
+}
 </script>
 {% endblock %}
