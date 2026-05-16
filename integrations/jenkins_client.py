@@ -38,7 +38,6 @@ class JenkinsClient:
         return self._connected
 
     def _get_crumb(self):
-        """Get Jenkins crumb for CSRF protection."""
         try:
             r = requests.get(
                 f"{self.url}/crumbIssuer/api/json",
@@ -67,7 +66,6 @@ class JenkinsClient:
             logger.warning("Jenkins not connected.")
             return False
         try:
-            # Escape XML special chars in jenkinsfile
             safe_script = (jenkinsfile
                            .replace('&', '&amp;')
                            .replace('<', '&lt;')
@@ -129,7 +127,45 @@ class JenkinsClient:
         except Exception:
             return {}
 
-    def get_build_console(self, job_name: str, build_number: int) -> str:
+    def get_build_console(self, job_name: str, build_number: int,
+                          start_byte: int = 0) -> tuple[str, int]:
+        """
+        Fetch Jenkins console output progressively using the
+        progressiveText API endpoint.
+
+        Returns:
+            (text, next_start_byte)
+            text            — new console text since start_byte
+            next_start_byte — pass this as start_byte on the next call
+                              to get only new content (0 when finished)
+
+        Usage:
+            text, offset = client.get_build_console(job, build_num, offset)
+            offset = 0 means the build has finished and all text was returned.
+        """
+        try:
+            r = requests.get(
+                f"{self.url}/job/{job_name}/{build_number}"
+                f"/logText/progressiveText?start={start_byte}",
+                auth=self.auth,
+                timeout=10,
+            )
+            if r.status_code != 200:
+                return '', start_byte
+
+            text = r.text
+            # X-Text-Size: total bytes written so far
+            next_offset = int(r.headers.get('X-Text-Size', start_byte + len(text.encode())))
+            # X-More-Data: 'true' while build is still running
+            more = r.headers.get('X-More-Data', 'false').lower() == 'true'
+
+            return text, (next_offset if more else 0)
+        except Exception as e:
+            logger.debug(f"Jenkins console fetch error: {e}")
+            return '', start_byte
+
+    def get_build_console_full(self, job_name: str, build_number: int) -> str:
+        """Fetch full console text in one shot (for finished builds)."""
         try:
             r = requests.get(
                 f"{self.url}/job/{job_name}/{build_number}/consoleText",
@@ -137,6 +173,21 @@ class JenkinsClient:
             return r.text if r.status_code == 200 else ""
         except Exception:
             return ""
+
+    def get_build_stages(self, job_name: str, build_number: int) -> list:
+        """
+        Fetch stage status from the Pipeline REST API (wfapi).
+        Returns a list of stage dicts with name, status, durationMillis.
+        """
+        try:
+            r = requests.get(
+                f"{self.url}/job/{job_name}/{build_number}/wfapi/describe",
+                auth=self.auth, timeout=5)
+            if r.status_code == 200:
+                return r.json().get('stages', [])
+        except Exception as e:
+            logger.debug(f"wfapi stages error: {e}")
+        return []
 
     def abort_build(self, job_name: str, build_number: int) -> bool:
         try:
