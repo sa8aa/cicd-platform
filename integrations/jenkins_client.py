@@ -1,12 +1,12 @@
 """
-Jenkins client using requests directly — avoids python-jenkins crumb issues.
+Jenkins client using requests.Session — persistent session fixes crumb issues.
 """
 import json
+import time
 import logging
 import requests
 from requests.auth import HTTPBasicAuth
 from django.conf import settings
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +48,20 @@ _CRED_SSH_XML = """<com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUs
   </privateKeySource>
 </com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey>"""
 
-_CRED_STORE = "system/domainCredentials/domain/_/credential"
-
 
 class JenkinsClient:
     def __init__(self):
-        self.url  = settings.JENKINS_URL.rstrip('/')
-        self.auth = HTTPBasicAuth(settings.JENKINS_USER, settings.JENKINS_TOKEN)
+        self.url = settings.JENKINS_URL.rstrip('/')
+        # Persistent session — crumb and cookies stay consistent across calls
+        self.session = requests.Session()
+        self.session.auth = HTTPBasicAuth(settings.JENKINS_USER, settings.JENKINS_TOKEN)
         self._connected = None
+        self._crumb_cache = None
 
     def is_connected(self):
         if self._connected is None:
             try:
-                r = requests.get(f"{self.url}/api/json", auth=self.auth, timeout=5)
+                r = self.session.get(f"{self.url}/api/json", timeout=5)
                 self._connected = r.status_code == 200
             except Exception as e:
                 logger.warning(f"Jenkins connection failed: {e}")
@@ -68,13 +69,17 @@ class JenkinsClient:
         return self._connected
 
     def _get_crumb(self):
+        """Fetch crumb once per session and cache it."""
+        if self._crumb_cache:
+            return self._crumb_cache
         try:
-            r = requests.get(f"{self.url}/crumbIssuer/api/json", auth=self.auth, timeout=5)
+            r = self.session.get(f"{self.url}/crumbIssuer/api/json", timeout=5)
             if r.status_code == 200:
                 data = r.json()
-                return {data['crumbRequestField']: data['crumb']}
-        except Exception:
-            pass
+                self._crumb_cache = {data['crumbRequestField']: data['crumb']}
+                return self._crumb_cache
+        except Exception as e:
+            logger.warning(f"Crumb fetch failed: {e}")
         return {}
 
     def _headers(self, content_type='application/xml'):
@@ -85,7 +90,8 @@ class JenkinsClient:
     # ── Job management ────────────────────────────────────────────────────
 
     def job_exists(self, job_name: str) -> bool:
-        r = requests.get(f"{self.url}/job/{job_name}/api/json", auth=self.auth, timeout=5)
+        r = self.session.get(
+            f"{self.url}/job/{job_name}/api/json", timeout=5)
         return r.status_code == 200
 
     def create_or_update_job(self, job_name: str, jenkinsfile: str,
@@ -98,60 +104,68 @@ class JenkinsClient:
                            .replace('&', '&amp;')
                            .replace('<', '&lt;')
                            .replace('>', '&gt;'))
-            config = JOB_CONFIG_XML.format(description=description, script=safe_script)
+            config = JOB_CONFIG_XML.format(
+                description=description or '',
+                script=safe_script,
+            )
+            headers = self._headers()
 
             if self.job_exists(job_name):
-                r = requests.post(
+                r = self.session.post(
                     f"{self.url}/job/{job_name}/config.xml",
-                    data=config.encode('utf-8'), auth=self.auth,
-                    headers=self._headers(), timeout=10)
+                    data=config.encode('utf-8'),
+                    headers=headers,
+                    timeout=15,
+                )
                 action = "updated"
             else:
-                r = requests.post(
+                r = self.session.post(
                     f"{self.url}/createItem?name={job_name}",
-                    data=config.encode('utf-8'), auth=self.auth,
-                    headers=self._headers(), timeout=10)
+                    data=config.encode('utf-8'),
+                    headers=headers,
+                    timeout=15,
+                )
                 action = "created"
 
             if r.status_code in (200, 201):
                 logger.info(f"Job '{job_name}' {action} successfully.")
                 return True
-            logger.error(f"Jenkins {action} job failed: {r.status_code} {r.text[:200]}")
+
+            logger.error(
+                f"Jenkins {action} job failed: {r.status_code} {r.text[:300]}")
             return False
+
         except Exception as e:
             logger.error(f"Jenkins create/update error: {e}")
             return False
 
     def trigger_build(self, job_name: str) -> dict:
         """
-        Triggers a Jenkins build and resolves the build number from the queue.
+        Triggers a build and resolves the build number from the Jenkins queue.
         Returns {'build_number': int, 'build_url': str} or {'mock': True}.
         """
         if not self.is_connected():
             return {'mock': True}
         try:
-            r = requests.post(
+            r = self.session.post(
                 f"{self.url}/job/{job_name}/build",
-                auth=self.auth,
                 headers=self._get_crumb(),
                 timeout=10,
             )
             if r.status_code not in (200, 201):
                 raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
 
-            # Jenkins returns a Location header pointing to the queue item
             queue_url = r.headers.get('Location', '')
             if not queue_url:
                 raise Exception("No Location header in Jenkins response")
 
             queue_api = queue_url.rstrip('/') + '/api/json'
 
-            # Poll the queue item until Jenkins assigns a build number
-            # (usually takes 1-5 seconds)
+            # Poll until Jenkins assigns a build number (usually 1-5s)
             for attempt in range(20):
                 time.sleep(2)
                 try:
-                    qr = requests.get(queue_api, auth=self.auth, timeout=5)
+                    qr = self.session.get(queue_api, timeout=5)
                     if qr.status_code == 200:
                         data = qr.json()
                         executable = data.get('executable')
@@ -159,7 +173,7 @@ class JenkinsClient:
                             build_number = executable.get('number')
                             build_url    = executable.get('url', '')
                             logger.info(
-                                f"Build #{build_number} started for job '{job_name}'")
+                                f"Build #{build_number} started for '{job_name}'")
                             return {
                                 'build_number': build_number,
                                 'build_url':    build_url,
@@ -168,7 +182,8 @@ class JenkinsClient:
                 except Exception as e:
                     logger.debug(f"Queue poll attempt {attempt}: {e}")
 
-            raise Exception("Timed out waiting for Jenkins to assign a build number")
+            raise Exception(
+                "Timed out waiting for Jenkins to assign a build number")
 
         except Exception as e:
             logger.error(f"Jenkins trigger error: {e}")
@@ -176,29 +191,25 @@ class JenkinsClient:
 
     def get_build_info(self, job_name: str, build_number: int) -> dict:
         try:
-            r = requests.get(
+            r = self.session.get(
                 f"{self.url}/job/{job_name}/{build_number}/api/json",
-                auth=self.auth, timeout=5)
+                timeout=5)
             return r.json() if r.status_code == 200 else {}
         except Exception:
             return {}
 
     def get_build_console(self, job_name: str, build_number: int,
                           start_byte: int = 0) -> tuple:
-        """
-        Fetch Jenkins console output progressively.
-        Returns (new_text, next_start_byte).
-        next_start_byte == 0 means build finished and all output was returned.
-        """
         try:
-            r = requests.get(
+            r = self.session.get(
                 f"{self.url}/job/{job_name}/{build_number}"
                 f"/logText/progressiveText?start={start_byte}",
-                auth=self.auth, timeout=10)
+                timeout=10)
             if r.status_code != 200:
                 return '', start_byte
             text        = r.text
-            next_offset = int(r.headers.get('X-Text-Size', start_byte + len(text.encode())))
+            next_offset = int(r.headers.get('X-Text-Size',
+                                            start_byte + len(text.encode())))
             more        = r.headers.get('X-More-Data', 'false').lower() == 'true'
             return text, (next_offset if more else 0)
         except Exception as e:
@@ -207,9 +218,9 @@ class JenkinsClient:
 
     def get_build_stages(self, job_name: str, build_number: int) -> list:
         try:
-            r = requests.get(
+            r = self.session.get(
                 f"{self.url}/job/{job_name}/{build_number}/wfapi/describe",
-                auth=self.auth, timeout=5)
+                timeout=5)
             if r.status_code == 200:
                 return r.json().get('stages', [])
         except Exception as e:
@@ -218,18 +229,20 @@ class JenkinsClient:
 
     def abort_build(self, job_name: str, build_number: int) -> bool:
         try:
-            r = requests.post(
+            r = self.session.post(
                 f"{self.url}/job/{job_name}/{build_number}/stop",
-                auth=self.auth, headers=self._get_crumb(), timeout=5)
+                headers=self._get_crumb(),
+                timeout=5)
             return r.status_code in (200, 302)
         except Exception:
             return False
 
     def delete_job(self, job_name: str) -> bool:
         try:
-            r = requests.post(
+            r = self.session.post(
                 f"{self.url}/job/{job_name}/doDelete",
-                auth=self.auth, headers=self._get_crumb(), timeout=5)
+                headers=self._get_crumb(),
+                timeout=5)
             return r.status_code in (200, 302)
         except Exception:
             return False
@@ -237,45 +250,43 @@ class JenkinsClient:
     # ── Credentials management ────────────────────────────────────────────
 
     def _credential_exists(self, cred_id: str) -> bool:
-        r = requests.get(
-            f"{self.url}/credentials/store/system/domain/_/credential/{cred_id}/api/json",
-            auth=self.auth, timeout=5)
+        r = self.session.get(
+            f"{self.url}/credentials/store/system/domain/_/"
+            f"credential/{cred_id}/api/json",
+            timeout=5)
         return r.status_code == 200
 
     def _push_credential(self, cred_id: str, xml: str) -> bool:
-        """Create or update a credential in Jenkins."""
         if not self.is_connected():
             return False
         try:
+            headers = self._headers()
             if self._credential_exists(cred_id):
-                # Update existing
-                r = requests.post(
-                    f"{self.url}/credentials/store/system/domain/_/credential/{cred_id}/config.xml",
+                r = self.session.post(
+                    f"{self.url}/credentials/store/system/domain/_/"
+                    f"credential/{cred_id}/config.xml",
                     data=xml.encode('utf-8'),
-                    auth=self.auth,
-                    headers=self._headers(),
+                    headers=headers,
                     timeout=10)
-                ok = r.status_code in (200, 201)
-                logger.info(f"Credential '{cred_id}' updated: {ok}")
             else:
-                # Create new
-                r = requests.post(
-                    f"{self.url}/credentials/store/system/domain/_/createCredentials",
+                r = self.session.post(
+                    f"{self.url}/credentials/store/system/domain/_/"
+                    f"createCredentials",
                     data=xml.encode('utf-8'),
-                    auth=self.auth,
-                    headers=self._headers(),
+                    headers=headers,
                     timeout=10)
-                ok = r.status_code in (200, 201)
-                logger.info(f"Credential '{cred_id}' created: {ok}")
+
+            ok = r.status_code in (200, 201)
             if not ok:
-                logger.error(f"Credential push failed: {r.status_code} {r.text[:300]}")
+                logger.error(
+                    f"Credential '{cred_id}' push failed: "
+                    f"{r.status_code} {r.text[:300]}")
             return ok
         except Exception as e:
             logger.error(f"Credential push error for '{cred_id}': {e}")
             return False
 
     def push_dockerhub_credentials(self, username: str, password: str) -> bool:
-        """Push dockerhub-creds (Username/Password) to Jenkins."""
         xml = _CRED_USERPASS_XML.format(
             cred_id='dockerhub-creds',
             description='DockerHub credentials — managed by CI/CD Platform',
@@ -284,8 +295,8 @@ class JenkinsClient:
         )
         return self._push_credential('dockerhub-creds', xml)
 
-    def push_aws_credentials(self, access_key_id: str, secret_access_key: str) -> bool:
-        """Push aws-credentials (Username=key_id / Password=secret) to Jenkins."""
+    def push_aws_credentials(self, access_key_id: str,
+                              secret_access_key: str) -> bool:
         xml = _CRED_USERPASS_XML.format(
             cred_id='aws-credentials',
             description='AWS credentials — managed by CI/CD Platform',
@@ -295,7 +306,6 @@ class JenkinsClient:
         return self._push_credential('aws-credentials', xml)
 
     def push_aws_session_token(self, session_token: str) -> bool:
-        """Push aws-session-token (Secret Text) to Jenkins."""
         xml = _CRED_SECRET_XML.format(
             cred_id='aws-session-token',
             description='AWS session token — managed by CI/CD Platform',
@@ -304,42 +314,26 @@ class JenkinsClient:
         return self._push_credential('aws-session-token', xml)
 
     def push_ssh_key(self, private_key_pem: str) -> bool:
-        """Push ec2-ssh-key (SSH private key) to Jenkins."""
         xml = _CRED_SSH_XML.format(
             cred_id='ec2-ssh-key',
             description='EC2 SSH key — managed by CI/CD Platform',
             username='ec2-user',
-            private_key=private_key_pem.replace('<', '&lt;').replace('>', '&gt;'),
+            private_key=private_key_pem.replace(
+                '<', '&lt;').replace('>', '&gt;'),
         )
         return self._push_credential('ec2-ssh-key', xml)
 
     def push_all_credentials(self, creds: dict) -> dict:
-        """
-        Push all 4 required credentials in one call.
-
-        creds dict keys:
-          dockerhub_username, dockerhub_password,
-          aws_access_key_id, aws_secret_access_key,
-          aws_session_token (optional),
-          ec2_ssh_key (PEM string)
-
-        Returns dict of {cred_id: bool} results.
-        """
         results = {}
-
         if creds.get('dockerhub_username') and creds.get('dockerhub_password'):
             results['dockerhub-creds'] = self.push_dockerhub_credentials(
                 creds['dockerhub_username'], creds['dockerhub_password'])
-
         if creds.get('aws_access_key_id') and creds.get('aws_secret_access_key'):
             results['aws-credentials'] = self.push_aws_credentials(
                 creds['aws_access_key_id'], creds['aws_secret_access_key'])
-
         if creds.get('aws_session_token'):
             results['aws-session-token'] = self.push_aws_session_token(
                 creds['aws_session_token'])
-
         if creds.get('ec2_ssh_key'):
             results['ec2-ssh-key'] = self.push_ssh_key(creds['ec2_ssh_key'])
-
         return results
