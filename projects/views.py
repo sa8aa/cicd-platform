@@ -5,7 +5,7 @@ from django.http import HttpResponse
 
 from .models import Project
 from .forms import ProjectForm
-from deployments.models import Deployment, DeploymentStage
+from deployments.models import Deployment, DeploymentStage, DeploymentLog
 from integrations.jenkins_client import JenkinsClient
 from integrations.jenkinsfile_generator import generate_jenkinsfile
 from integrations.infra_generator import (
