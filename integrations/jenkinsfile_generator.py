@@ -1,8 +1,7 @@
 """
 Generates the Jenkinsfile dynamically from Project fields.
-Strategy: DockerHub only - keeps last 5 images, no ECR.
+Strategy: DockerHub only, no ECR, no cleanup script.
 All strings ASCII-only to avoid Jenkins XML parse errors.
-Cleanup uses sh single-quotes block to avoid Groovy interpolation.
 """
 
 
@@ -63,7 +62,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # Stage 4: Build & Push Images
+    # Stage 4: Build & Push Images (DockerHub only)
     jf += "        stage('Build & Push Images') {\n"
     jf += "            steps {\n"
     jf += "                sh \"\"\"\n"
@@ -75,26 +74,6 @@ def generate_jenkinsfile(project) -> str:
     jf += "                    docker push " + image_name + ":latest\n"
     jf += "                    echo 'Image pushed to DockerHub successfully'\n"
     jf += "                \"\"\"\n"
-    jf += "                sh '''\n"
-    jf += "                    DH_USER=$DOCKERHUB_CREDENTIALS_USR\n"
-    jf += "                    DH_PASS=$DOCKERHUB_CREDENTIALS_PSW\n"
-    jf += "                    DH_IMAGE=" + image_name + "\n"
-    jf += "                    DH_TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login \\\n"
-    jf += "                        -H \"Content-Type: application/json\" \\\n"
-    jf += "                        -d \"{\\\"username\\\":\\\"$DH_USER\\\",\\\"password\\\":\\\"$DH_PASS\\\"}\" \\\n"
-    jf += "                        | python3 -c \"import sys,json; print(json.load(sys.stdin).get('token',''))\")\n"
-    jf += "                    TAGS=$(curl -s \\\n"
-    jf += "                        \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/?page_size=100\" \\\n"
-    jf += "                        -H \"Authorization: Bearer $DH_TOKEN\" \\\n"
-    jf += "                        | python3 -c \"\nimport sys,json\nd=json.load(sys.stdin)\nts=[t['name'] for t in d.get('results',[]) if t['name']!='latest' and t['name'].isdigit()]\nts.sort(key=int)\nprint(' '.join(ts[:-5]) if len(ts)>5 else '')\n\")\n"
-    jf += "                    for OLD_TAG in $TAGS; do\n"
-    jf += "                        echo \"Deleting old tag: $OLD_TAG\"\n"
-    jf += "                        curl -s -X DELETE \\\n"
-    jf += "                            \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/$OLD_TAG/\" \\\n"
-    jf += "                            -H \"Authorization: Bearer $DH_TOKEN\" || true\n"
-    jf += "                    done\n"
-    jf += "                    echo 'DockerHub cleanup done'\n"
-    jf += "                '''\n"
     jf += "            }\n"
     jf += "            post {\n"
     jf += "                success { echo 'Build and push successful' }\n"
