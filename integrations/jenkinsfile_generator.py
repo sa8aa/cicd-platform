@@ -1,10 +1,41 @@
 """
 Generates the Jenkinsfile dynamically from Project fields.
-Uses string concatenation to avoid f-string/backslash conflicts.
+Strategy: DockerHub only — keeps last 5 images, no ECR.
 """
+import re
+
+DOCKERHUB_CLEANUP_SCRIPT = '''
+                        # ── Keep only last 5 images on DockerHub ──────────
+                        TAGS=$(curl -s "https://hub.docker.com/v2/repositories/{image_name}/tags/?page_size=100" \\
+                            -H "Authorization: Bearer $(curl -s \\
+                                -X POST "https://hub.docker.com/v2/users/login/" \\
+                                -H "Content-Type: application/json" \\
+                                -d '{{"username":"'"\\$DOCKERHUB_CREDENTIALS_USR"'","password":"'"\\$DOCKERHUB_CREDENTIALS_PSW"'"}}' \\
+                                | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")" \\
+                            | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+tags = [t['name'] for t in data.get('results', []) if t['name'] != 'latest']
+tags_sorted = sorted(tags, key=lambda x: int(x) if x.isdigit() else 0)
+to_delete = tags_sorted[:-5] if len(tags_sorted) > 5 else []
+print(' '.join(to_delete))
+")
+                        TOKEN=$(curl -s \\
+                            -X POST "https://hub.docker.com/v2/users/login/" \\
+                            -H "Content-Type: application/json" \\
+                            -d '{{"username":"'"\\$DOCKERHUB_CREDENTIALS_USR"'","password":"'"\\$DOCKERHUB_CREDENTIALS_PSW"'"}}' \\
+                            | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+                        for TAG in $TAGS; do
+                            echo "Deleting old image tag: $TAG"
+                            curl -s -X DELETE \\
+                                "https://hub.docker.com/v2/repositories/{image_name}/tags/$TAG/" \\
+                                -H "Authorization: Bearer $TOKEN" || true
+                        done
+                        echo "Cleanup done — kept last 5 builds."
+'''
+
 
 def generate_jenkinsfile(project) -> str:
-    ecr_repo   = project.ecr_repo
     image_name = project.image_name or (
         project.dockerhub_username + '/' + project.jenkins_job_name)
     job_name   = project.jenkins_job_name
@@ -19,6 +50,8 @@ def generate_jenkinsfile(project) -> str:
     k8s_svc    = project.k8s_service_file
     port       = str(project.app_port)
 
+    cleanup = DOCKERHUB_CLEANUP_SCRIPT.replace('{image_name}', image_name)
+
     jf  = "pipeline {\n"
     jf += "    agent any\n\n"
     jf += "    environment {\n"
@@ -26,7 +59,6 @@ def generate_jenkinsfile(project) -> str:
     jf += "        IMAGE_NAME            = '" + image_name + "'\n"
     jf += "        AWS_REGION            = '" + region + "'\n"
     jf += "        AWS_ACCOUNT_ID        = '" + account + "'\n"
-    jf += "        ECR_REPO              = '" + ecr_repo + "'\n"
     jf += "        IMAGE_TAG             = \"${BUILD_NUMBER}\"\n"
     jf += "        KEY_NAME              = '" + key_name + "'\n"
     jf += "    }\n\n"
@@ -62,43 +94,23 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 4: Build & Push Images ────────────────────────────────────
+    # ── Stage 4: Build & Push to DockerHub ──────────────────────────────
     jf += "        stage('Build & Push Images') {\n"
     jf += "            steps {\n"
-    jf += "                withCredentials([\n"
-    jf += "                    usernamePassword(credentialsId: 'aws-credentials',\n"
-    jf += "                        usernameVariable: 'AWS_ACCESS_KEY_ID',\n"
-    jf += "                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'),\n"
-    jf += "                    string(credentialsId: 'aws-session-token',\n"
-    jf += "                        variable: 'AWS_SESSION_TOKEN')\n"
-    jf += "                ]) {\n"
-    jf += "                    sh \"\"\"\n"
-    jf += "                        export AWS_ACCESS_KEY_ID=\\${AWS_ACCESS_KEY_ID}\n"
-    jf += "                        export AWS_SECRET_ACCESS_KEY=\\${AWS_SECRET_ACCESS_KEY}\n"
-    jf += "                        export AWS_SESSION_TOKEN=\\${AWS_SESSION_TOKEN}\n\n"
-    jf += "                        docker build -t " + image_name + ":\\${IMAGE_TAG} .\n\n"
-    jf += "                        echo \\$DOCKERHUB_CREDENTIALS_PSW | docker login \\\n"
-    jf += "                            -u \\$DOCKERHUB_CREDENTIALS_USR --password-stdin\n"
-    jf += "                        docker tag " + image_name + ":\\${IMAGE_TAG} " + image_name + ":latest\n"
-    jf += "                        docker push " + image_name + ":\\${IMAGE_TAG}\n"
-    jf += "                        docker push " + image_name + ":latest\n\n"
-    jf += "                        aws ecr describe-repositories \\\n"
-    jf += "                            --repository-names " + job_name + " \\\n"
-    jf += "                            --region " + region + " 2>/dev/null || \\\n"
-    jf += "                        aws ecr create-repository \\\n"
-    jf += "                            --repository-name " + job_name + " \\\n"
-    jf += "                            --region " + region + "\n\n"
-    jf += "                        AWS_PASS=\\$(aws ecr get-login-password --region " + region + ")\n"
-    jf += "                        echo \"\\$AWS_PASS\" | docker login \\\n"
-    jf += "                            --username AWS \\\n"
-    jf += "                            --password-stdin " + account + ".dkr.ecr." + region + ".amazonaws.com\n\n"
-    jf += "                        docker tag " + image_name + ":\\${IMAGE_TAG} " + ecr_repo + ":\\${IMAGE_TAG}\n"
-    jf += "                        docker tag " + image_name + ":\\${IMAGE_TAG} " + ecr_repo + ":latest\n"
-    jf += "                        docker push " + ecr_repo + ":\\${IMAGE_TAG}\n"
-    jf += "                        docker push " + ecr_repo + ":latest\n\n"
-    jf += "                        echo 'Images pushed to DockerHub and ECR'\n"
-    jf += "                    \"\"\"\n"
-    jf += "                }\n"
+    jf += "                sh \"\"\"\n"
+    jf += "                    set -e\n\n"
+    jf += "                    # Build image\n"
+    jf += "                    docker build -t " + image_name + ":\\${IMAGE_TAG} .\n\n"
+    jf += "                    # Login to DockerHub\n"
+    jf += "                    echo \\$DOCKERHUB_CREDENTIALS_PSW | docker login \\\n"
+    jf += "                        -u \\$DOCKERHUB_CREDENTIALS_USR --password-stdin\n\n"
+    jf += "                    # Tag and push versioned + latest\n"
+    jf += "                    docker tag " + image_name + ":\\${IMAGE_TAG} " + image_name + ":latest\n"
+    jf += "                    docker push " + image_name + ":\\${IMAGE_TAG}\n"
+    jf += "                    docker push " + image_name + ":latest\n\n"
+    jf += "                    echo 'Image pushed to DockerHub successfully'\n"
+    jf += cleanup
+    jf += "                \"\"\"\n"
     jf += "            }\n"
     jf += "            post {\n"
     jf += "                success { echo 'Build and push successful' }\n"
@@ -175,7 +187,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 6: Deploy to k3s ───────────────────────────────────────────
+    # ── Stage 6: Deploy to k3s (DockerHub image) ─────────────────────────
     jf += "        stage('Deploy to k3s') {\n"
     jf += "            steps {\n"
     jf += "                withCredentials([\n"
@@ -191,30 +203,27 @@ def generate_jenkinsfile(project) -> str:
     jf += "                        export AWS_ACCESS_KEY_ID=\\${AWS_ACCESS_KEY_ID}\n"
     jf += "                        export AWS_SECRET_ACCESS_KEY=\\${AWS_SECRET_ACCESS_KEY}\n"
     jf += "                        export AWS_SESSION_TOKEN=\\${AWS_SESSION_TOKEN}\n\n"
-    jf += "                        EC2_IP=\\$(cat /tmp/ec2-ip.txt)\n"
-    jf += "                        ECR_PASSWORD=\\$(aws ecr get-login-password --region " + region + ")\n\n"
+    jf += "                        EC2_IP=\\$(cat /tmp/ec2-ip.txt)\n\n"
+    jf += "                        # Create DockerHub pull secret on k3s\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
-    jf += "                            \"sudo mkdir -p /etc/rancher/k3s\"\n\n"
-    jf += "                        cat <<REGEOF | ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no \\\n"
-    jf += "                            ec2-user@\\$EC2_IP 'sudo tee /etc/rancher/k3s/registries.yaml'\n"
-    jf += "mirrors:\n"
-    jf += "  " + account + ".dkr.ecr." + region + ".amazonaws.com:\n"
-    jf += "    endpoint:\n"
-    jf += "      - https://" + account + ".dkr.ecr." + region + ".amazonaws.com\n"
-    jf += "configs:\n"
-    jf += "  " + account + ".dkr.ecr." + region + ".amazonaws.com:\n"
-    jf += "    auth:\n"
-    jf += "      username: AWS\n"
-    jf += "      password: \\$ECR_PASSWORD\n"
-    jf += "REGEOF\n\n"
-    jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
-    jf += "                            \"sudo systemctl restart k3s && sleep 15\"\n\n"
+    jf += "                            \"sudo kubectl create secret docker-registry dockerhub-secret \\\n"
+    jf += "                                --docker-server=https://index.docker.io/v1/ \\\n"
+    jf += "                                --docker-username=\\$DOCKERHUB_CREDENTIALS_USR \\\n"
+    jf += "                                --docker-password=\\$DOCKERHUB_CREDENTIALS_PSW \\\n"
+    jf += "                                --dry-run=client -o yaml | sudo kubectl apply -f -\"\n\n"
+    jf += "                        # Copy manifests to EC2\n"
     jf += "                        scp -i \\${SSH_KEY} -o StrictHostKeyChecking=no \\\n"
     jf += "                            " + k8s_dep + " " + k8s_svc + " \\\n"
     jf += "                            ec2-user@\\$EC2_IP:/home/ec2-user/\n\n"
+    jf += "                        # Apply manifests\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
     jf += "                            \"sudo kubectl apply -f /home/ec2-user/deployment.yaml && \\\n"
     jf += "                             sudo kubectl apply -f /home/ec2-user/service.yaml\"\n\n"
+    jf += "                        # Update image to current build tag\n"
+    jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
+    jf += "                            \"sudo kubectl set image deployment/" + job_name + " \\\n"
+    jf += "                                " + job_name + "=" + image_name + ":\\${IMAGE_TAG}\"\n\n"
+    jf += "                        # Wait for rollout\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
     jf += "                            \"sudo kubectl rollout status deployment/" + job_name + " --timeout=180s\"\n\n"
     jf += "                        echo \"App deployed at http://\\$EC2_IP:" + port + "\"\n"
