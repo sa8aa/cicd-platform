@@ -2,37 +2,41 @@
 Generates the Jenkinsfile dynamically from Project fields.
 Strategy: DockerHub only — keeps last 5 images, no ECR.
 """
-import re
 
-DOCKERHUB_CLEANUP_SCRIPT = '''
-                        # ── Keep only last 5 images on DockerHub ──────────
-                        TAGS=$(curl -s "https://hub.docker.com/v2/repositories/{image_name}/tags/?page_size=100" \\
-                            -H "Authorization: Bearer $(curl -s \\
-                                -X POST "https://hub.docker.com/v2/users/login/" \\
-                                -H "Content-Type: application/json" \\
-                                -d '{{"username":"'"\\$DOCKERHUB_CREDENTIALS_USR"'","password":"'"\\$DOCKERHUB_CREDENTIALS_PSW"'"}}' \\
-                                | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")" \\
-                            | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-tags = [t['name'] for t in data.get('results', []) if t['name'] != 'latest']
-tags_sorted = sorted(tags, key=lambda x: int(x) if x.isdigit() else 0)
-to_delete = tags_sorted[:-5] if len(tags_sorted) > 5 else []
-print(' '.join(to_delete))
-")
-                        TOKEN=$(curl -s \\
-                            -X POST "https://hub.docker.com/v2/users/login/" \\
-                            -H "Content-Type: application/json" \\
-                            -d '{{"username":"'"\\$DOCKERHUB_CREDENTIALS_USR"'","password":"'"\\$DOCKERHUB_CREDENTIALS_PSW"'"}}' \\
-                            | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
-                        for TAG in $TAGS; do
-                            echo "Deleting old image tag: $TAG"
-                            curl -s -X DELETE \\
-                                "https://hub.docker.com/v2/repositories/{image_name}/tags/$TAG/" \\
-                                -H "Authorization: Bearer $TOKEN" || true
-                        done
-                        echo "Cleanup done — kept last 5 builds."
-'''
+def _dockerhub_cleanup(image_name: str) -> str:
+    """
+    Returns a shell snippet that keeps only the last 5 numeric tags on DockerHub.
+    Avoids JSON/quote characters that would break Jenkins XML config.
+    Uses env vars already in scope: DOCKERHUB_CREDENTIALS_USR / _PSW
+    """
+    return (
+        "\n"
+        "                        # ── Keep only last 5 images on DockerHub ──\n"
+        "                        DH_USER=$DOCKERHUB_CREDENTIALS_USR\n"
+        "                        DH_PASS=$DOCKERHUB_CREDENTIALS_PSW\n"
+        "                        DH_IMAGE=" + image_name + "\n"
+        "                        DH_TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login"
+        " -H 'Content-Type: application/json'"
+        " --data-raw '{\"username\":\"'\"$DH_USER\"'\",\"password\":\"'\"$DH_PASS\"'\"}'"
+        " | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get(\"token\",\"\"))')\n"
+        "                        TAGS=$(curl -s"
+        " \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/?page_size=100\""
+        " -H \"Authorization: Bearer $DH_TOKEN\""
+        " | python3 -c '\n"
+        "import sys,json\n"
+        "d=json.load(sys.stdin)\n"
+        "ts=[t[\"name\"] for t in d.get(\"results\",[]) if t[\"name\"]!=\"latest\" and t[\"name\"].isdigit()]\n"
+        "ts.sort(key=int)\n"
+        "print(\" \".join(ts[:-5]) if len(ts)>5 else \"\")\n"
+        "')\n"
+        "                        for OLD_TAG in $TAGS; do\n"
+        "                            echo \"Deleting old tag: $OLD_TAG\"\n"
+        "                            curl -s -X DELETE"
+        " \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/$OLD_TAG/\""
+        " -H \"Authorization: Bearer $DH_TOKEN\" || true\n"
+        "                        done\n"
+        "                        echo 'DockerHub cleanup done — kept last 5 builds.'\n"
+    )
 
 
 def generate_jenkinsfile(project) -> str:
@@ -50,7 +54,7 @@ def generate_jenkinsfile(project) -> str:
     k8s_svc    = project.k8s_service_file
     port       = str(project.app_port)
 
-    cleanup = DOCKERHUB_CLEANUP_SCRIPT.replace('{image_name}', image_name)
+    cleanup = _dockerhub_cleanup(image_name)
 
     jf  = "pipeline {\n"
     jf += "    agent any\n\n"
