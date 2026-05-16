@@ -13,6 +13,12 @@ from integrations.infra_generator import (
     generate_k8s_service,
     generate_cloudformation,
 )
+import threading
+import time
+import logging
+from django.utils import timezone
+ 
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -172,18 +178,143 @@ def project_deploy(request, pk):
                 deployment=deployment, name=name, order=i)
         try:
             result = client.trigger_build(project.jenkins_job_name)
-            deployment.status = 'RUNNING'
-            deployment.save(update_fields=['status'])
+ 
             if result.get('mock'):
+                # Jenkins not connected — simulate
+                deployment.status = 'RUNNING'
+                deployment.save(update_fields=['status'])
                 messages.info(request, 'Jenkins non connecté — déploiement simulé.')
             else:
+                # Save build number and URL immediately
+                deployment.jenkins_build_number = result.get('build_number')
+                deployment.jenkins_build_url    = result.get('build_url', '')
+                deployment.status = 'RUNNING'
+                deployment.save(update_fields=[
+                    'status', 'jenkins_build_number', 'jenkins_build_url'])
+ 
                 messages.success(request,
-                    f'Pipeline déclenché ! Suivez le déploiement #{deployment.pk}')
+                    f'Pipeline déclenché ! Build #{deployment.jenkins_build_number}')
+ 
+                # Start background thread to sync final status from Jenkins
+                t = threading.Thread(
+                    target=_sync_deployment_status,
+                    args=(deployment.pk,),
+                    daemon=True,
+                )
+                t.start()
+ 
         except Exception as e:
             deployment.mark_finished('FAILED', str(e))
             messages.error(request, f'Erreur Jenkins: {e}')
+ 
         return redirect('deployment_detail', pk=deployment.pk)
     return redirect('project_detail', pk=pk)
+ 
+ 
+def _sync_deployment_status(deployment_pk: int):
+    """
+    Background thread — polls Jenkins every 10s until the build finishes,
+    then updates Deployment status, stages, and logs in the DB.
+    """
+    import django
+    from deployments.models import Deployment, DeploymentStage, DeploymentLog
+    from integrations.jenkins_client import JenkinsClient
+ 
+    # Map Jenkins stage names → our stage names
+    STAGE_MAP = {
+        'Checkout':             'Checkout',
+        'Install Dependencies': 'Install Dependencies',
+        'Run Tests':            'Run Tests',
+        'Build & Push Images':  'Build & Push Images',
+        'Provision Infra':      'Provision Infra',
+        'Deploy to k3s':        'Deploy to k3s',
+    }
+    STATUS_MAP = {
+        'SUCCESS':   'SUCCESS',
+        'FAILED':    'FAILED',
+        'FAILURE':   'FAILED',
+        'IN_PROGRESS': 'RUNNING',
+        'NOT_EXECUTED': 'SKIPPED',
+        'ABORTED':   'CANCELLED',
+        'PAUSED_PENDING_INPUT': 'RUNNING',
+    }
+ 
+    max_wait  = 60 * 45   # 45 min hard limit
+    poll_interval = 10    # seconds
+    elapsed   = 0
+    client    = JenkinsClient()
+ 
+    try:
+        dep = Deployment.objects.get(pk=deployment_pk)
+    except Deployment.DoesNotExist:
+        return
+ 
+    job_name     = dep.project.jenkins_job_name
+    build_number = dep.jenkins_build_number
+ 
+    if not build_number:
+        return
+ 
+    while elapsed < max_wait:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+ 
+        try:
+            dep.refresh_from_db()
+ 
+            # If manually cancelled, stop polling
+            if dep.status == 'CANCELLED':
+                return
+ 
+            # 1. Get build info from Jenkins
+            build_info = client.get_build_info(job_name, build_number)
+            if not build_info:
+                continue
+ 
+            building = build_info.get('building', True)
+            result   = build_info.get('result')  # None while building
+ 
+            # 2. Update stage statuses from wfapi
+            stages_data = client.get_build_stages(job_name, build_number)
+            for s in stages_data:
+                stage_name   = s.get('name', '')
+                stage_status = STATUS_MAP.get(s.get('status', ''), 'PENDING')
+                mapped_name  = STAGE_MAP.get(stage_name, stage_name)
+ 
+                DeploymentStage.objects.filter(
+                    deployment=dep, name=mapped_name
+                ).update(status=stage_status)
+ 
+            # 3. If build finished, update deployment status
+            if not building and result:
+                final_status = STATUS_MAP.get(result, 'FAILED')
+ 
+                # Add a summary log entry
+                DeploymentLog.objects.create(
+                    deployment=dep,
+                    level='SUCCESS' if final_status == 'SUCCESS' else 'ERROR',
+                    message=f'Jenkins build #{build_number} finished: {result}',
+                    timestamp=timezone.now(),
+                )
+ 
+                dep.mark_finished(final_status,
+                    '' if final_status == 'SUCCESS' else f'Jenkins result: {result}')
+ 
+                logger.info(
+                    f"Deployment #{deployment_pk} synced from Jenkins: {final_status}")
+                return
+ 
+        except Exception as e:
+            logger.warning(f"Sync error for deployment #{deployment_pk}: {e}")
+            continue
+ 
+    # Timeout — mark as failed
+    try:
+        dep.refresh_from_db()
+        if dep.status in ('PENDING', 'RUNNING'):
+            dep.mark_finished('FAILED', 'Timeout: Jenkins sync exceeded 45 minutes.')
+    except Exception:
+        pass
 
 
 @login_required
