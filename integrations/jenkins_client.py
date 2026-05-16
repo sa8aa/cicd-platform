@@ -6,6 +6,7 @@ import logging
 import requests
 from requests.auth import HTTPBasicAuth
 from django.conf import settings
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -122,15 +123,53 @@ class JenkinsClient:
             return False
 
     def trigger_build(self, job_name: str) -> dict:
+        """
+        Triggers a Jenkins build and resolves the build number from the queue.
+        Returns {'build_number': int, 'build_url': str} or {'mock': True}.
+        """
         if not self.is_connected():
             return {'mock': True}
         try:
             r = requests.post(
                 f"{self.url}/job/{job_name}/build",
-                auth=self.auth, headers=self._get_crumb(), timeout=10)
-            if r.status_code in (200, 201):
-                return {'status': 'queued'}
-            raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
+                auth=self.auth,
+                headers=self._get_crumb(),
+                timeout=10,
+            )
+            if r.status_code not in (200, 201):
+                raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
+
+            # Jenkins returns a Location header pointing to the queue item
+            queue_url = r.headers.get('Location', '')
+            if not queue_url:
+                raise Exception("No Location header in Jenkins response")
+
+            queue_api = queue_url.rstrip('/') + '/api/json'
+
+            # Poll the queue item until Jenkins assigns a build number
+            # (usually takes 1-5 seconds)
+            for attempt in range(20):
+                time.sleep(2)
+                try:
+                    qr = requests.get(queue_api, auth=self.auth, timeout=5)
+                    if qr.status_code == 200:
+                        data = qr.json()
+                        executable = data.get('executable')
+                        if executable:
+                            build_number = executable.get('number')
+                            build_url    = executable.get('url', '')
+                            logger.info(
+                                f"Build #{build_number} started for job '{job_name}'")
+                            return {
+                                'build_number': build_number,
+                                'build_url':    build_url,
+                                'status':       'queued',
+                            }
+                except Exception as e:
+                    logger.debug(f"Queue poll attempt {attempt}: {e}")
+
+            raise Exception("Timed out waiting for Jenkins to assign a build number")
+
         except Exception as e:
             logger.error(f"Jenkins trigger error: {e}")
             raise
