@@ -107,41 +107,177 @@
       </div>
     </div>
 
-    <!-- Section: Advanced -->
-    <div class="form-section">
+    <!-- ══════════════════════════════════════════════════════════════════
+         Section: Credentials (NEW)
+         These fields are NOT stored in DB — sent to Jenkins via API only
+    ══════════════════════════════════════════════════════════════════ -->
+    <div class="form-section border-start border-warning border-3 ps-3">
       <div class="form-section-title">
-        <i class="bi bi-sliders me-2"></i>Configuration avancée
+        <i class="bi bi-shield-lock me-2 text-warning"></i>Credentials
+        <span class="badge bg-warning text-dark ms-2 fw-normal" style="font-size:.65rem">
+          Non stockés en base
+        </span>
       </div>
-      <div class="row g-3 mb-3">
-        <div class="col-md-6">
-          <label class="form-label fw-semibold small">{{ form.k8s_deployment_file.label }}</label>
-          {{ form.k8s_deployment_file }}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold small">{{ form.k8s_service_file.label }}</label>
-          {{ form.k8s_service_file }}
-        </div>
+
+      <div class="alert alert-warning py-2 small mb-3">
+        <i class="bi bi-info-circle me-1"></i>
+        Ces informations sont transmises directement à Jenkins via son API sécurisée et
+        <strong>ne sont jamais persistées</strong> dans la base de données.
       </div>
-      <div class="row g-3">
-        <div class="col-md-8">
-          <label class="form-label fw-semibold small">{{ form.cf_template_file.label }}</label>
-          {{ form.cf_template_file }}
-        </div>
-        <div class="col-md-4">
-          <label class="form-label fw-semibold small">{{ form.app_port.label }}</label>
-          {{ form.app_port }}
-          <div class="form-text">{{ form.app_port.help_text }}</div>
-          {% if form.app_port.errors %}<div class="text-danger small">{{ form.app_port.errors }}</div>{% endif %}
-        </div>
+
+      <!-- DockerHub -->
+      <p class="text-muted small fw-semibold mb-2 text-uppercase" style="letter-spacing:.05em">
+        DockerHub
+      </p>
+      <div class="mb-3">
+        <label class="form-label fw-semibold small">{{ form.dockerhub_password.label }}</label>
+        {{ form.dockerhub_password }}
+        <div class="form-text">{{ form.dockerhub_password.help_text }}</div>
+        {% if form.dockerhub_password.errors %}
+          <div class="text-danger small">{{ form.dockerhub_password.errors }}</div>
+        {% endif %}
       </div>
+
+      <!-- AWS Credentials -->
+      <div id="aws-credentials">
+        <p class="text-muted small fw-semibold mb-2 text-uppercase" style="letter-spacing:.05em">
+          AWS Credentials
+        </p>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold small">{{ form.aws_access_key_id.label }}</label>
+            {{ form.aws_access_key_id }}
+            {% if form.aws_access_key_id.errors %}
+              <div class="text-danger small">{{ form.aws_access_key_id.errors }}</div>
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold small">{{ form.aws_secret_access_key.label }}</label>
+            {{ form.aws_secret_access_key }}
+            {% if form.aws_secret_access_key.errors %}
+              <div class="text-danger small">{{ form.aws_secret_access_key.errors }}</div>
+            {% endif %}
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">{{ form.aws_session_token.label }}</label>
+          {{ form.aws_session_token }}
+          {% if form.aws_session_token.errors %}
+            <div class="text-danger small">{{ form.aws_session_token.errors }}</div>
+          {% endif %}
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">{{ form.ec2_ssh_key_pem.label }}</label>
+          {{ form.ec2_ssh_key_pem }}
+          <div class="form-text">{{ form.ec2_ssh_key_pem.help_text }}</div>
+          {% if form.ec2_ssh_key_pem.errors %}
+            <div class="text-danger small">{{ form.ec2_ssh_key_pem.errors }}</div>
+          {% endif %}
+        </div>
+      </div><!-- /#aws-credentials -->
     </div>
 
-    <!-- Credentials reminder -->
-    <div class="alert alert-info py-2 small">
-      <i class="bi bi-shield-lock-fill me-2"></i>
-      <strong>Credentials Jenkins requis :</strong> Configurez dans Jenkins →
-      <code>dockerhub-creds</code>, <code>aws-credentials</code>,
-      <code>aws-session-token</code>, <code>ec2-ssh-key</code>
+    <!-- ══════════════════════════════════════════════════════════════════
+         Section: Infrastructure Generator (NEW)
+    ══════════════════════════════════════════════════════════════════ -->
+    <div class="form-section border-start border-info border-3 ps-3">
+      <div class="form-section-title">
+        <i class="bi bi-cpu me-2 text-info"></i>Génération des manifests
+      </div>
+
+      <!-- Toggle: generate_manifests -->
+      <div class="form-check form-switch mb-3">
+        {{ form.generate_manifests }}
+        <label class="form-check-label fw-semibold small ms-2" for="{{ form.generate_manifests.id_for_label }}">
+          Générer automatiquement les manifests K8s + CloudFormation
+        </label>
+        <div class="form-text">
+          Si activé, la plateforme génère et injecte les manifests dans le pipeline.
+          Sinon, les chemins de fichiers existants dans votre dépôt sont utilisés.
+        </div>
+      </div>
+
+      <!-- Fields shown when generate_manifests = true -->
+      <div id="infra-generator-fields">
+        <p class="text-muted small fw-semibold mb-2 text-uppercase" style="letter-spacing:.05em">
+          Configuration conteneur & infrastructure
+        </p>
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold small">{{ form.container_port.label }}</label>
+            {{ form.container_port }}
+            <div class="form-text">{{ form.container_port.help_text }}</div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold small">{{ form.ec2_instance_type.label }}</label>
+            {{ form.ec2_instance_type }}
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold small">{{ form.k8s_replicas.label }}</label>
+            {{ form.k8s_replicas }}
+            <div class="form-text">{{ form.k8s_replicas.help_text }}</div>
+          </div>
+        </div>
+
+        <p class="text-muted small fw-semibold mb-2 text-uppercase" style="letter-spacing:.05em">
+          Ressources Kubernetes
+        </p>
+        <div class="row g-3 mb-3">
+          <div class="col-md-3">
+            <label class="form-label fw-semibold small">CPU Request</label>
+            {{ form.k8s_cpu_request }}
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold small">Memory Request</label>
+            {{ form.k8s_memory_request }}
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold small">CPU Limit</label>
+            {{ form.k8s_cpu_limit }}
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold small">Memory Limit</label>
+            {{ form.k8s_memory_limit }}
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">{{ form.k8s_env_vars.label }}</label>
+          {{ form.k8s_env_vars }}
+          <div class="form-text">{{ form.k8s_env_vars.help_text }}</div>
+        </div>
+      </div><!-- /#infra-generator-fields -->
+
+      <!-- Fields shown when generate_manifests = false -->
+      <div id="infra-path-fields" style="display:none">
+        <p class="text-muted small fw-semibold mb-2 text-uppercase" style="letter-spacing:.05em">
+          Chemins des manifests dans le dépôt
+        </p>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold small">{{ form.k8s_deployment_file.label }}</label>
+            {{ form.k8s_deployment_file }}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold small">{{ form.k8s_service_file.label }}</label>
+            {{ form.k8s_service_file }}
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label fw-semibold small">{{ form.cf_template_file.label }}</label>
+            {{ form.cf_template_file }}
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold small">{{ form.app_port.label }}</label>
+            {{ form.app_port }}
+            <div class="form-text">{{ form.app_port.help_text }}</div>
+            {% if form.app_port.errors %}
+              <div class="text-danger small">{{ form.app_port.errors }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </div><!-- /#infra-path-fields -->
     </div>
 
     <!-- Actions -->
@@ -179,28 +315,101 @@
         &nbsp;&nbsp;}<br>
         }
       </div>
+
+      <!-- Credentials status indicators (NEW) -->
       <div class="mt-3">
-        <p class="text-muted small mb-2 fw-semibold">Credentials Jenkins nécessaires :</p>
+        <p class="text-muted small mb-2 fw-semibold">Credentials Jenkins :</p>
         <div class="d-flex flex-wrap gap-1">
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>dockerhub-creds</span>
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>aws-credentials</span>
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>aws-session-token</span>
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>ec2-ssh-key</span>
+          <span class="badge bg-light text-dark border" id="badge-dockerhub">
+            <i class="bi bi-circle text-secondary me-1"></i>dockerhub-creds
+          </span>
+          <span class="badge bg-light text-dark border" id="badge-aws">
+            <i class="bi bi-circle text-secondary me-1"></i>aws-credentials
+          </span>
+          <span class="badge bg-light text-dark border" id="badge-session">
+            <i class="bi bi-circle text-secondary me-1"></i>aws-session-token
+          </span>
+          <span class="badge bg-light text-dark border" id="badge-ssh">
+            <i class="bi bi-circle text-secondary me-1"></i>ec2-ssh-key
+          </span>
+        </div>
+        <p class="text-muted mt-2 mb-0" style="font-size:.65rem">
+          <i class="bi bi-circle-fill text-success me-1"></i>Renseigné
+          <i class="bi bi-circle text-secondary ms-2 me-1"></i>Vide
+        </p>
+      </div>
+
+      <!-- Infra generator summary (NEW) -->
+      <div class="mt-3 p-2 rounded" style="background:#f0f7ff;font-size:.72rem" id="infra-summary">
+        <p class="fw-semibold mb-1 text-info"><i class="bi bi-cpu me-1"></i>Manifests générés</p>
+        <div class="text-muted">
+          Replicas : <strong id="summary-replicas">1</strong> &nbsp;|&nbsp;
+          Port : <strong id="summary-port">8000</strong> &nbsp;|&nbsp;
+          EC2 : <strong id="summary-ec2">t3.small</strong>
         </div>
       </div>
     </div>
   </div>
+
 </div>
 </form>
 
 <script>
-// Show/hide AWS fields based on cloud provider selection
-const providerSel = document.getElementById('id_cloud_provider');
-const awsFields   = document.getElementById('aws-fields');
-function toggleAws(){
-  awsFields.style.display = providerSel.value === 'AWS' ? '' : 'none';
+// ── AWS visibility ────────────────────────────────────────────────────────────
+const providerSel    = document.getElementById('id_cloud_provider');
+const awsFields      = document.getElementById('aws-fields');
+const awsCredentials = document.getElementById('aws-credentials');
+
+function toggleAws() {
+  const isAws = providerSel.value === 'AWS';
+  awsFields.style.display      = isAws ? '' : 'none';
+  awsCredentials.style.display = isAws ? '' : 'none';
 }
 providerSel?.addEventListener('change', toggleAws);
 toggleAws();
+
+// ── Manifest mode toggle ──────────────────────────────────────────────────────
+const generateToggle   = document.getElementById('id_generate_manifests');
+const infraGenFields   = document.getElementById('infra-generator-fields');
+const infraPathFields  = document.getElementById('infra-path-fields');
+const infraSummary     = document.getElementById('infra-summary');
+
+function toggleManifestMode() {
+  const generate = generateToggle.checked;
+  infraGenFields.style.display  = generate ? '' : 'none';
+  infraPathFields.style.display = generate ? 'none' : '';
+  infraSummary.style.display    = generate ? '' : 'none';
+}
+generateToggle?.addEventListener('change', toggleManifestMode);
+toggleManifestMode();
+
+// ── Live credential badges ────────────────────────────────────────────────────
+function makeBadgeWatcher(inputId, badgeId) {
+  const input = document.getElementById(inputId);
+  const badge = document.getElementById(badgeId);
+  if (!input || !badge) return;
+  const icon = badge.querySelector('i');
+  input.addEventListener('input', () => {
+    const filled = input.value.trim().length > 0;
+    icon.className = filled
+      ? 'bi bi-circle-fill text-success me-1'
+      : 'bi bi-circle text-secondary me-1';
+  });
+}
+makeBadgeWatcher('id_dockerhub_password',   'badge-dockerhub');
+makeBadgeWatcher('id_aws_access_key_id',    'badge-aws');
+makeBadgeWatcher('id_aws_session_token',    'badge-session');
+makeBadgeWatcher('id_ec2_ssh_key_pem',      'badge-ssh');
+
+// ── Live infra summary ────────────────────────────────────────────────────────
+function bindSummary(inputId, summaryId) {
+  const input   = document.getElementById(inputId);
+  const display = document.getElementById(summaryId);
+  if (!input || !display) return;
+  input.addEventListener('input', () => { display.textContent = input.value || '—'; });
+}
+bindSummary('id_k8s_replicas',      'summary-replicas');
+bindSummary('id_container_port',    'summary-port');
+bindSummary('id_ec2_instance_type', 'summary-ec2');
 </script>
 {% endblock %}
