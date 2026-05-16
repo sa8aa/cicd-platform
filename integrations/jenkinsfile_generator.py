@@ -1,60 +1,25 @@
 """
 Generates the Jenkinsfile dynamically from Project fields.
-Strategy: DockerHub only — keeps last 5 images, no ECR.
+Strategy: DockerHub only - keeps last 5 images, no ECR.
+All strings ASCII-only to avoid Jenkins XML parse errors.
+Cleanup uses sh single-quotes block to avoid Groovy interpolation.
 """
-
-def _dockerhub_cleanup(image_name: str) -> str:
-    """
-    Returns a shell snippet that keeps only the last 5 numeric tags on DockerHub.
-    Avoids JSON/quote characters that would break Jenkins XML config.
-    Uses env vars already in scope: DOCKERHUB_CREDENTIALS_USR / _PSW
-    """
-    return (
-        "\n"
-        "                        # ── Keep only last 5 images on DockerHub ──\n"
-        "                        DH_USER=$DOCKERHUB_CREDENTIALS_USR\n"
-        "                        DH_PASS=$DOCKERHUB_CREDENTIALS_PSW\n"
-        "                        DH_IMAGE=" + image_name + "\n"
-        "                        DH_TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login"
-        " -H 'Content-Type: application/json'"
-        " --data-raw '{\"username\":\"'\"$DH_USER\"'\",\"password\":\"'\"$DH_PASS\"'\"}'"
-        " | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get(\"token\",\"\"))')\n"
-        "                        TAGS=$(curl -s"
-        " \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/?page_size=100\""
-        " -H \"Authorization: Bearer $DH_TOKEN\""
-        " | python3 -c '\n"
-        "import sys,json\n"
-        "d=json.load(sys.stdin)\n"
-        "ts=[t[\"name\"] for t in d.get(\"results\",[]) if t[\"name\"]!=\"latest\" and t[\"name\"].isdigit()]\n"
-        "ts.sort(key=int)\n"
-        "print(\" \".join(ts[:-5]) if len(ts)>5 else \"\")\n"
-        "')\n"
-        "                        for OLD_TAG in $TAGS; do\n"
-        "                            echo \"Deleting old tag: $OLD_TAG\"\n"
-        "                            curl -s -X DELETE"
-        " \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/$OLD_TAG/\""
-        " -H \"Authorization: Bearer $DH_TOKEN\" || true\n"
-        "                        done\n"
-        "                        echo 'DockerHub cleanup done — kept last 5 builds.'\n"
-    )
 
 
 def generate_jenkinsfile(project) -> str:
     image_name = project.image_name or (
         project.dockerhub_username + '/' + project.jenkins_job_name)
-    job_name   = project.jenkins_job_name
-    region     = project.aws_region
-    account    = project.aws_account_id
-    key_name   = project.aws_key_name
-    stack      = project.cf_stack_name
-    branch     = project.branch
-    repo_url   = project.repo_url
-    cf_tpl     = project.cf_template_file
-    k8s_dep    = project.k8s_deployment_file
-    k8s_svc    = project.k8s_service_file
-    port       = str(project.app_port)
-
-    cleanup = _dockerhub_cleanup(image_name)
+    job_name = project.jenkins_job_name
+    region   = project.aws_region
+    account  = project.aws_account_id
+    key_name = project.aws_key_name
+    stack    = project.cf_stack_name
+    branch   = project.branch
+    repo_url = project.repo_url
+    cf_tpl   = project.cf_template_file
+    k8s_dep  = project.k8s_deployment_file
+    k8s_svc  = project.k8s_service_file
+    port     = str(project.app_port)
 
     jf  = "pipeline {\n"
     jf += "    agent any\n\n"
@@ -68,7 +33,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "    }\n\n"
     jf += "    stages {\n\n"
 
-    # ── Stage 1: Checkout ───────────────────────────────────────────────
+    # Stage 1: Checkout
     jf += "        stage('Checkout') {\n"
     jf += "            steps {\n"
     jf += "                git branch: '" + branch + "',\n"
@@ -76,7 +41,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 2: Install Dependencies ───────────────────────────────────
+    # Stage 2: Install Dependencies
     jf += "        stage('Install Dependencies') {\n"
     jf += "            steps {\n"
     jf += "                sh '''\n"
@@ -88,7 +53,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 3: Run Tests ───────────────────────────────────────────────
+    # Stage 3: Run Tests
     jf += "        stage('Run Tests') {\n"
     jf += "            steps {\n"
     jf += "                sh '''\n"
@@ -98,23 +63,38 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 4: Build & Push to DockerHub ──────────────────────────────
+    # Stage 4: Build & Push Images
     jf += "        stage('Build & Push Images') {\n"
     jf += "            steps {\n"
     jf += "                sh \"\"\"\n"
-    jf += "                    set -e\n\n"
-    jf += "                    # Build image\n"
-    jf += "                    docker build -t " + image_name + ":\\${IMAGE_TAG} .\n\n"
-    jf += "                    # Login to DockerHub\n"
-    jf += "                    echo \\$DOCKERHUB_CREDENTIALS_PSW | docker login \\\n"
-    jf += "                        -u \\$DOCKERHUB_CREDENTIALS_USR --password-stdin\n\n"
-    jf += "                    # Tag and push versioned + latest\n"
+    jf += "                    set -e\n"
+    jf += "                    docker build -t " + image_name + ":\\${IMAGE_TAG} .\n"
+    jf += "                    echo \\$DOCKERHUB_CREDENTIALS_PSW | docker login -u \\$DOCKERHUB_CREDENTIALS_USR --password-stdin\n"
     jf += "                    docker tag " + image_name + ":\\${IMAGE_TAG} " + image_name + ":latest\n"
     jf += "                    docker push " + image_name + ":\\${IMAGE_TAG}\n"
-    jf += "                    docker push " + image_name + ":latest\n\n"
+    jf += "                    docker push " + image_name + ":latest\n"
     jf += "                    echo 'Image pushed to DockerHub successfully'\n"
-    jf += cleanup
     jf += "                \"\"\"\n"
+    jf += "                sh '''\n"
+    jf += "                    DH_USER=$DOCKERHUB_CREDENTIALS_USR\n"
+    jf += "                    DH_PASS=$DOCKERHUB_CREDENTIALS_PSW\n"
+    jf += "                    DH_IMAGE=" + image_name + "\n"
+    jf += "                    DH_TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login \\\n"
+    jf += "                        -H \"Content-Type: application/json\" \\\n"
+    jf += "                        -d \"{\\\"username\\\":\\\"$DH_USER\\\",\\\"password\\\":\\\"$DH_PASS\\\"}\" \\\n"
+    jf += "                        | python3 -c \"import sys,json; print(json.load(sys.stdin).get('token',''))\")\n"
+    jf += "                    TAGS=$(curl -s \\\n"
+    jf += "                        \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/?page_size=100\" \\\n"
+    jf += "                        -H \"Authorization: Bearer $DH_TOKEN\" \\\n"
+    jf += "                        | python3 -c \"\nimport sys,json\nd=json.load(sys.stdin)\nts=[t['name'] for t in d.get('results',[]) if t['name']!='latest' and t['name'].isdigit()]\nts.sort(key=int)\nprint(' '.join(ts[:-5]) if len(ts)>5 else '')\n\")\n"
+    jf += "                    for OLD_TAG in $TAGS; do\n"
+    jf += "                        echo \"Deleting old tag: $OLD_TAG\"\n"
+    jf += "                        curl -s -X DELETE \\\n"
+    jf += "                            \"https://hub.docker.com/v2/repositories/$DH_IMAGE/tags/$OLD_TAG/\" \\\n"
+    jf += "                            -H \"Authorization: Bearer $DH_TOKEN\" || true\n"
+    jf += "                    done\n"
+    jf += "                    echo 'DockerHub cleanup done'\n"
+    jf += "                '''\n"
     jf += "            }\n"
     jf += "            post {\n"
     jf += "                success { echo 'Build and push successful' }\n"
@@ -122,7 +102,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 5: Provision Infra ─────────────────────────────────────────
+    # Stage 5: Provision Infra
     jf += "        stage('Provision Infra') {\n"
     jf += "            steps {\n"
     jf += "                withCredentials([\n"
@@ -158,7 +138,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "                                --region " + region + "\n"
     jf += "                        elif [ \"\\$STACK_STATUS\" = \"CREATE_COMPLETE\" ] || \\\n"
     jf += "                             [ \"\\$STACK_STATUS\" = \"UPDATE_COMPLETE\" ]; then\n"
-    jf += "                            echo 'Stack already exists — skipping'\n"
+    jf += "                            echo 'Stack already exists - skipping'\n"
     jf += "                        else\n"
     jf += "                            echo \"Unexpected stack status: \\$STACK_STATUS\"\n"
     jf += "                            exit 1\n"
@@ -177,7 +157,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "                            if echo \"\\$STATUS\" | grep -q 'Ready'; then\n"
     jf += "                                echo \"k3s is ready: \\$STATUS\"; break\n"
     jf += "                            fi\n"
-    jf += "                            echo \"Attempt \\$i/30 — waiting 10s...\"\n"
+    jf += "                            echo \"Attempt \\$i/30 - waiting 10s...\"\n"
     jf += "                            sleep 10\n"
     jf += "                            if [ \\$i -eq 30 ]; then echo 'k3s not ready'; exit 1; fi\n"
     jf += "                        done\n"
@@ -191,7 +171,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 6: Deploy to k3s (DockerHub image) ─────────────────────────
+    # Stage 6: Deploy to k3s
     jf += "        stage('Deploy to k3s') {\n"
     jf += "            steps {\n"
     jf += "                withCredentials([\n"
@@ -208,26 +188,21 @@ def generate_jenkinsfile(project) -> str:
     jf += "                        export AWS_SECRET_ACCESS_KEY=\\${AWS_SECRET_ACCESS_KEY}\n"
     jf += "                        export AWS_SESSION_TOKEN=\\${AWS_SESSION_TOKEN}\n\n"
     jf += "                        EC2_IP=\\$(cat /tmp/ec2-ip.txt)\n\n"
-    jf += "                        # Create DockerHub pull secret on k3s\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
     jf += "                            \"sudo kubectl create secret docker-registry dockerhub-secret \\\n"
     jf += "                                --docker-server=https://index.docker.io/v1/ \\\n"
     jf += "                                --docker-username=\\$DOCKERHUB_CREDENTIALS_USR \\\n"
     jf += "                                --docker-password=\\$DOCKERHUB_CREDENTIALS_PSW \\\n"
     jf += "                                --dry-run=client -o yaml | sudo kubectl apply -f -\"\n\n"
-    jf += "                        # Copy manifests to EC2\n"
     jf += "                        scp -i \\${SSH_KEY} -o StrictHostKeyChecking=no \\\n"
     jf += "                            " + k8s_dep + " " + k8s_svc + " \\\n"
     jf += "                            ec2-user@\\$EC2_IP:/home/ec2-user/\n\n"
-    jf += "                        # Apply manifests\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
     jf += "                            \"sudo kubectl apply -f /home/ec2-user/deployment.yaml && \\\n"
     jf += "                             sudo kubectl apply -f /home/ec2-user/service.yaml\"\n\n"
-    jf += "                        # Update image to current build tag\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
     jf += "                            \"sudo kubectl set image deployment/" + job_name + " \\\n"
     jf += "                                " + job_name + "=" + image_name + ":\\${IMAGE_TAG}\"\n\n"
-    jf += "                        # Wait for rollout\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
     jf += "                            \"sudo kubectl rollout status deployment/" + job_name + " --timeout=180s\"\n\n"
     jf += "                        echo \"App deployed at http://\\$EC2_IP:" + port + "\"\n"
@@ -241,7 +216,6 @@ def generate_jenkinsfile(project) -> str:
     jf += "        }\n\n"
     jf += "    }\n\n"
 
-    # ── Post ──────────────────────────────────────────────────────────────
     jf += "    post {\n"
     jf += "        always {\n"
     jf += "            sh 'docker logout || true'\n"
