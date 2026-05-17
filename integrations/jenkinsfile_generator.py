@@ -1,8 +1,19 @@
 """
 Generates the Jenkinsfile dynamically from Project fields.
-Strategy: DockerHub only, no ECR, no cleanup script.
+Strategy: DockerHub only, no ECR.
+Manifests are injected into the workspace via writeFile (Groovy).
 All strings ASCII-only to avoid Jenkins XML parse errors.
 """
+from integrations.infra_generator import (
+    generate_k8s_deployment,
+    generate_k8s_service,
+    generate_cloudformation,
+)
+
+
+def _escape_groovy_string(s: str) -> str:
+    """Escape a string for use inside a Groovy triple-single-quoted string."""
+    return s.replace('\\', '\\\\').replace("'", "\\'")
 
 
 def generate_jenkinsfile(project) -> str:
@@ -15,10 +26,20 @@ def generate_jenkinsfile(project) -> str:
     stack    = project.cf_stack_name
     branch   = project.branch
     repo_url = project.repo_url
-    cf_tpl   = project.cf_template_file
-    k8s_dep  = project.k8s_deployment_file
-    k8s_svc  = project.k8s_service_file
+    k8s_dep  = project.k8s_deployment_file   # e.g. k8s/deployment.yaml
+    k8s_svc  = project.k8s_service_file      # e.g. k8s/service.yaml
+    cf_tpl   = project.cf_template_file      # e.g. cloudformation/infra-stack.yaml
     port     = str(project.app_port)
+
+    # Pre-generate manifests if enabled
+    if project.generate_manifests:
+        cf_content  = _escape_groovy_string(generate_cloudformation(project))
+        k8s_dep_content = _escape_groovy_string(generate_k8s_deployment(project))
+        k8s_svc_content = _escape_groovy_string(generate_k8s_service(project))
+    else:
+        cf_content  = None
+        k8s_dep_content = None
+        k8s_svc_content = None
 
     jf  = "pipeline {\n"
     jf += "    agent any\n\n"
@@ -62,7 +83,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # Stage 4: Build & Push Images (DockerHub only)
+    # Stage 4: Build & Push Images
     jf += "        stage('Build & Push Images') {\n"
     jf += "            steps {\n"
     jf += "                sh \"\"\"\n"
@@ -84,6 +105,15 @@ def generate_jenkinsfile(project) -> str:
     # Stage 5: Provision Infra
     jf += "        stage('Provision Infra') {\n"
     jf += "            steps {\n"
+
+    # Inject generated manifests via writeFile if generate_manifests=True
+    if cf_content is not None:
+        jf += "                // Write generated CloudFormation manifest\n"
+        jf += "                sh 'mkdir -p cloudformation k8s'\n"
+        jf += "                writeFile file: '" + cf_tpl + "', text: '''" + cf_content + "'''\n"
+        jf += "                writeFile file: '" + k8s_dep + "', text: '''" + k8s_dep_content + "'''\n"
+        jf += "                writeFile file: '" + k8s_svc + "', text: '''" + k8s_svc_content + "'''\n"
+
     jf += "                withCredentials([\n"
     jf += "                    usernamePassword(credentialsId: 'aws-credentials',\n"
     jf += "                        usernameVariable: 'AWS_ACCESS_KEY_ID',\n"
