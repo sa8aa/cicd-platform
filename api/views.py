@@ -152,3 +152,111 @@ def jenkins_webhook(request):
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return Response({'error': str(e)}, status=500)
+
+
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+from deployments.models import Deployment, DeploymentStage
+
+
+@login_required
+def deployment_status(request, pk):
+    """
+    AJAX endpoint — returns real-time stage statuses from Jenkins.
+    Called every 5s from the deployment detail page.
+    """
+    try:
+        dep = Deployment.objects.get(pk=pk)
+
+        # If finished, just return DB data
+        if dep.status in ('SUCCESS', 'FAILED', 'CANCELLED'):
+            stages = list(dep.stages.values('name', 'status', 'duration', 'order'))
+            return JsonResponse({
+                'deployment_status': dep.status,
+                'finished': True,
+                'stages': stages,
+                'duration': str(dep.duration) if dep.duration else '',
+            })
+
+        # If running — poll Jenkins for live stage data
+        stages_data = []
+        if dep.jenkins_build_number:
+            from integrations.jenkins_client import JenkinsClient
+            client = JenkinsClient()
+            jenkins_stages = client.get_build_stages(
+                dep.project.jenkins_job_name,
+                dep.jenkins_build_number)
+
+            if jenkins_stages:
+                for js in jenkins_stages:
+                    DeploymentStage.objects.filter(
+                        deployment=dep,
+                        name__icontains=js['name'].split()[0]
+                    ).update(status=js['status'])
+                stages_data = jenkins_stages
+
+                # Check if Jenkins build finished
+                build_info = client.get_build_info(
+                    dep.project.jenkins_job_name,
+                    dep.jenkins_build_number)
+                result = build_info.get('result')
+                if result in ('SUCCESS', 'FAILURE', 'ABORTED'):
+                    final = {'SUCCESS': 'SUCCESS',
+                             'FAILURE': 'FAILED',
+                             'ABORTED': 'CANCELLED'}.get(result, 'FAILED')
+                    dep.mark_finished(final)
+            else:
+                stages_data = list(dep.stages.values(
+                    'name', 'status', 'duration', 'order'))
+        else:
+            stages_data = list(dep.stages.values(
+                'name', 'status', 'duration', 'order'))
+
+        return JsonResponse({
+            'deployment_status': dep.status,
+            'finished': False,
+            'stages': stages_data,
+            'duration': '',
+        })
+    except Deployment.DoesNotExist:
+        return JsonResponse({'error': 'Not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+from django.http import HttpResponse
+
+def metrics_view(request):
+    """
+    Expose Django metrics for Prometheus scraping.
+    URL: /metrics/
+    """
+    try:
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        from prometheus_client import Gauge, Counter
+
+        # Current platform stats
+        from projects.models import Project
+        from deployments.models import Deployment
+
+        # Total projects
+        g_projects = Gauge('cicd_projects_total',
+                           'Total number of projects')
+        g_projects.set(Project.objects.count())
+
+        # Running deployments
+        g_running = Gauge('cicd_deployments_running',
+                          'Currently running deployments')
+        g_running.set(Deployment.objects.filter(status='RUNNING').count())
+
+        return HttpResponse(
+            generate_latest(),
+            content_type=CONTENT_TYPE_LATEST)
+    except ImportError:
+        return HttpResponse(
+            "# prometheus_client not installed\n",
+            content_type="text/plain")
+    except Exception as e:
+        return HttpResponse(
+            f"# Error: {e}\n",
+            content_type="text/plain")

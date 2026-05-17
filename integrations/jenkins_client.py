@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 """
 Jenkins client using requests directly — avoids python-jenkins crumb issues.
 """
+=======
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
 import logging
 import requests
 from requests.auth import HTTPBasicAuth
@@ -8,6 +11,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 JOB_CONFIG_XML = """<?xml version='1.1' encoding='UTF-8'?>
 <flow-definition plugin="workflow-job">
   <description>{description}</description>
@@ -19,6 +23,8 @@ JOB_CONFIG_XML = """<?xml version='1.1' encoding='UTF-8'?>
   <disabled>false</disabled>
 </flow-definition>"""
 
+=======
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
 
 class JenkinsClient:
     def __init__(self):
@@ -38,11 +44,17 @@ class JenkinsClient:
         return self._connected
 
     def _get_crumb(self):
+<<<<<<< HEAD
         """Get Jenkins crumb for CSRF protection."""
         try:
             r = requests.get(
                 f"{self.url}/crumbIssuer/api/json",
                 auth=self.auth, timeout=5)
+=======
+        try:
+            r = requests.get(f"{self.url}/crumbIssuer/api/json",
+                             auth=self.auth, timeout=5)
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
             if r.status_code == 200:
                 data = r.json()
                 return {data['crumbRequestField']: data['crumb']}
@@ -50,16 +62,55 @@ class JenkinsClient:
             pass
         return {}
 
+<<<<<<< HEAD
     def _headers(self):
         h = {'Content-Type': 'application/xml'}
+=======
+    def _headers_xml(self):
+        h = {'Content-Type': 'application/xml; charset=utf-8'}
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
         h.update(self._get_crumb())
         return h
 
     def job_exists(self, job_name: str) -> bool:
+<<<<<<< HEAD
         r = requests.get(
             f"{self.url}/job/{job_name}/api/json",
             auth=self.auth, timeout=5)
         return r.status_code == 200
+=======
+        r = requests.get(f"{self.url}/job/{job_name}/api/json",
+                         auth=self.auth, timeout=5)
+        return r.status_code == 200
+
+    def _build_config_xml(self, jenkinsfile: str, description: str = '') -> bytes:
+        # Clean non-ASCII characters that break XML
+        jenkinsfile = jenkinsfile.replace('—', '-').replace('–', '-')
+
+        safe_desc = (description
+                     .replace('&', '&amp;')
+                     .replace('<', '&lt;')
+                     .replace('>', '&gt;')
+                     .replace('"', '&quot;'))
+
+        config = (
+            "<?xml version='1.1' encoding='UTF-8'?>\n"
+            "<flow-definition plugin=\"workflow-job\">\n"
+            "  <description>" + safe_desc + "</description>\n"
+            "  <keepDependencies>false</keepDependencies>\n"
+            "  <definition class=\"org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition\""
+            " plugin=\"workflow-cps\">\n"
+            "    <script><![CDATA[\n"
+            + jenkinsfile +
+            "\n    ]]></script>\n"
+            "    <sandbox>true</sandbox>\n"
+            "  </definition>\n"
+            "  <triggers/>\n"
+            "  <disabled>false</disabled>\n"
+            "</flow-definition>"
+        )
+        return config.encode('utf-8')
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
 
     def create_or_update_job(self, job_name: str, jenkinsfile: str,
                               description: str = '') -> bool:
@@ -67,6 +118,7 @@ class JenkinsClient:
             logger.warning("Jenkins not connected.")
             return False
         try:
+<<<<<<< HEAD
             # Escape XML special chars in jenkinsfile
             safe_script = (jenkinsfile
                            .replace('&', '&amp;')
@@ -83,21 +135,39 @@ class JenkinsClient:
                     auth=self.auth,
                     headers=self._headers(),
                     timeout=10)
+=======
+            config = self._build_config_xml(jenkinsfile, description)
+            if self.job_exists(job_name):
+                r = requests.post(
+                    f"{self.url}/job/{job_name}/config.xml",
+                    data=config, auth=self.auth,
+                    headers=self._headers_xml(), timeout=15)
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
                 action = "updated"
             else:
                 r = requests.post(
                     f"{self.url}/createItem?name={job_name}",
+<<<<<<< HEAD
                     data=config.encode('utf-8'),
                     auth=self.auth,
                     headers=self._headers(),
                     timeout=10)
+=======
+                    data=config, auth=self.auth,
+                    headers=self._headers_xml(), timeout=15)
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
                 action = "created"
 
             if r.status_code in (200, 201):
                 logger.info(f"Job '{job_name}' {action} successfully.")
                 return True
             else:
+<<<<<<< HEAD
                 logger.error(f"Jenkins {action} job failed: {r.status_code} {r.text[:200]}")
+=======
+                logger.error(f"Jenkins {action} job failed: "
+                             f"{r.status_code} {r.text[:300]}")
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
                 return False
         except Exception as e:
             logger.error(f"Jenkins create/update error: {e}")
@@ -120,9 +190,56 @@ class JenkinsClient:
             logger.error(f"Jenkins trigger error: {e}")
             raise
 
+<<<<<<< HEAD
     def get_build_info(self, job_name: str, build_number: int) -> dict:
         try:
             r = requests.get(
+=======
+    def get_last_build_number(self, job_name: str):
+        """Get the latest build number for a job."""
+        try:
+            r = requests.get(
+                f"{self.url}/job/{job_name}/lastBuild/api/json",
+                auth=self.auth, timeout=5)
+            if r.status_code == 200:
+                return r.json().get('number')
+        except Exception as e:
+            logger.error(f"Jenkins get_last_build_number error: {e}")
+        return None
+
+    def get_build_stages(self, job_name: str, build_number: int) -> list:
+        """Get real-time stage statuses from Jenkins Pipeline Steps API."""
+        try:
+            r = requests.get(
+                f"{self.url}/job/{job_name}/{build_number}/wfapi/describe",
+                auth=self.auth, timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                stages = []
+                status_map = {
+                    'SUCCESS':             'SUCCESS',
+                    'FAILED':              'FAILED',
+                    'FAILURE':             'FAILED',
+                    'IN_PROGRESS':         'RUNNING',
+                    'NOT_EXECUTED':        'SKIPPED',
+                    'PAUSED_PENDING_INPUT':'RUNNING',
+                }
+                for s in data.get('stages', []):
+                    duration_ms = s.get('durationMillis', 0)
+                    stages.append({
+                        'name':     s.get('name', ''),
+                        'status':   status_map.get(s.get('status', ''), 'PENDING'),
+                        'duration': f"{round(duration_ms/1000, 1)}s" if duration_ms else '...',
+                    })
+                return stages
+        except Exception as e:
+            logger.error(f"Jenkins get_build_stages error: {e}")
+        return []
+
+    def get_build_info(self, job_name: str, build_number: int) -> dict:
+        try:
+            r = requests.get(
+>>>>>>> 4d62fcb (feat: update platform - stages realtime, credentials, jenkinsfile generator)
                 f"{self.url}/job/{job_name}/{build_number}/api/json",
                 auth=self.auth, timeout=5)
             return r.json() if r.status_code == 200 else {}

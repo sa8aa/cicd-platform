@@ -7,10 +7,10 @@
 {% csrf_token %}
 <div class="row g-3">
 
-  <!-- Left column -->
+  <!-- LEFT COLUMN -->
   <div class="col-lg-7">
 
-    <!-- Section: Projet -->
+    <!-- Projet -->
     <div class="form-section">
       <div class="form-section-title">
         <i class="bi bi-info-circle me-2"></i>Informations du projet
@@ -26,7 +26,7 @@
       </div>
     </div>
 
-    <!-- Section: Git -->
+    <!-- Git -->
     <div class="form-section">
       <div class="form-section-title">
         <i class="bi bi-git me-2"></i>Dépôt GitHub
@@ -35,7 +35,6 @@
         <div class="col-md-9">
           <label class="form-label fw-semibold small">{{ form.repo_url.label }}</label>
           {{ form.repo_url }}
-          {% if form.repo_url.errors %}<div class="text-danger small">{{ form.repo_url.errors }}</div>{% endif %}
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold small">{{ form.branch.label }}</label>
@@ -44,7 +43,36 @@
       </div>
     </div>
 
-    <!-- Section: Cloud -->
+    <!-- Project Type -->
+    <div class="form-section">
+      <div class="form-section-title">
+        <i class="bi bi-code-square me-2"></i>Type de projet
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.project_type.label }}</label>
+          {{ form.project_type }}
+        </div>
+        <div class="col-md-6" id="build-tool-group">
+          <label class="form-label fw-semibold small">{{ form.build_tool.label }}</label>
+          {{ form.build_tool }}
+          <div class="form-text">Maven ou Gradle pour Java, NPM pour Node/React</div>
+        </div>
+      </div>
+      <!-- Stage preview depending on type -->
+      <div class="mt-3 p-2 rounded" style="background:#F1EFE8;border:1px solid #ddd">
+        <div class="small text-muted mb-1 fw-semibold">Stage 2 — Install Dependencies :</div>
+        <code class="small" id="install-preview" style="color:#185FA5">
+          python3 -m venv venv &amp;&amp; pip install -r requirements.txt
+        </code>
+        <div class="small text-muted mt-1 mb-1 fw-semibold">Stage 3 — Run Tests :</div>
+        <code class="small" id="test-preview" style="color:#185FA5">
+          venv/bin/python manage.py test
+        </code>
+      </div>
+    </div>
+
+    <!-- Cloud Config -->
     <div class="form-section">
       <div class="form-section-title">
         <i class="bi bi-cloud me-2"></i>Configuration Cloud
@@ -59,55 +87,102 @@
           {{ form.environment }}
         </div>
       </div>
-
-      <!-- AWS fields (shown only when AWS selected) -->
-      <div id="aws-fields">
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <label class="form-label fw-semibold small">{{ form.aws_region.label }}</label>
-            {{ form.aws_region }}
-          </div>
-          <div class="col-md-6">
-            <label class="form-label fw-semibold small">{{ form.aws_account_id.label }}</label>
-            {{ form.aws_account_id }}
-            <div class="form-text">{{ form.aws_account_id.help_text }}</div>
-            {% if form.aws_account_id.errors %}<div class="text-danger small">{{ form.aws_account_id.errors }}</div>{% endif %}
-          </div>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.aws_region.label }}</label>
+          {{ form.aws_region }}
         </div>
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label fw-semibold small">{{ form.aws_key_name.label }}</label>
-            {{ form.aws_key_name }}
-            <div class="form-text">{{ form.aws_key_name.help_text }}</div>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label fw-semibold small">{{ form.cf_stack_name.label }}</label>
-            {{ form.cf_stack_name }}
-            <div class="form-text">{{ form.cf_stack_name.help_text }}</div>
-          </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.aws_account_id.label }}</label>
+          {{ form.aws_account_id }}
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.aws_key_name.label }}</label>
+          {{ form.aws_key_name }}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.cf_stack_name.label }}</label>
+          {{ form.cf_stack_name }}
         </div>
       </div>
     </div>
 
-    <!-- Section: Docker -->
+    <!-- AWS Credentials -->
+    <div class="form-section">
+      <div class="form-section-title" style="color:#BA7517;border-bottom-color:#FAC775">
+        <i class="bi bi-key me-2"></i>Credentials AWS
+        <span class="badge ms-2" style="background:#BA7517;font-size:.65rem">
+          Appli automatiquement dans Jenkins</span>
+      </div>
+      <div class="alert py-2 small mb-3"
+           style="background:#FFF8E1;border:1px solid #FAC775;color:#5a3e00">
+        <i class="bi bi-info-circle me-1"></i>
+        Ces credentials sont <strong>poussés automatiquement vers Jenkins</strong>
+        à la création du projet. Avec AWS Learner Lab, le Session Token expire
+        toutes les 4h — utilisez le bouton <strong>Mettre à jour credentials</strong>
+        sur la page du projet.
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.aws_access_key_id.label }}</label>
+          {{ form.aws_access_key_id }}
+          <div class="form-text">Depuis AWS Details → Show</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold small">{{ form.aws_secret_access_key.label }}</label>
+          {{ form.aws_secret_access_key }}
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold small">{{ form.aws_session_token.label }}</label>
+        {{ form.aws_session_token }}
+        <div class="form-text">Token temporaire AWS Learner Lab (très long)</div>
+      </div>
+    </div>
+
+    <!-- EC2 SSH Key -->
+    <div class="form-section">
+      <div class="form-section-title" style="color:#BA7517;border-bottom-color:#FAC775">
+        <i class="bi bi-shield-lock me-2"></i>Clé SSH EC2 (.pem)
+      </div>
+      <div class="mb-2">
+        <label class="form-label fw-semibold small">{{ form.ec2_private_key.label }}</label>
+        {{ form.ec2_private_key }}
+        <div class="form-text">
+          Colle le contenu complet du fichier <code>vockey.pem</code>
+          (commence par <code>-----BEGIN RSA PRIVATE KEY-----</code>)
+        </div>
+      </div>
+    </div>
+
+    <!-- Docker -->
     <div class="form-section">
       <div class="form-section-title">
         <i class="bi bi-box me-2"></i>Docker & Images
       </div>
-      <div class="row g-3">
+      <div class="row g-3 mb-3">
         <div class="col-md-6">
           <label class="form-label fw-semibold small">{{ form.dockerhub_username.label }}</label>
           {{ form.dockerhub_username }}
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold small">{{ form.image_name.label }}</label>
-          {{ form.image_name }}
-          <div class="form-text">{{ form.image_name.help_text }}</div>
+          <label class="form-label fw-semibold small">{{ form.dockerhub_token.label }}</label>
+          {{ form.dockerhub_token }}
+          <div class="form-text">
+            DockerHub → Account Settings → Security → New Access Token
+          </div>
         </div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label fw-semibold small">{{ form.image_name.label }}</label>
+        {{ form.image_name }}
+        <div class="form-text">Format: dockerhub_user/nom-image</div>
       </div>
     </div>
 
-    <!-- Section: Advanced -->
+    <!-- Advanced -->
     <div class="form-section">
       <div class="form-section-title">
         <i class="bi bi-sliders me-2"></i>Configuration avancée
@@ -130,77 +205,68 @@
         <div class="col-md-4">
           <label class="form-label fw-semibold small">{{ form.app_port.label }}</label>
           {{ form.app_port }}
-          <div class="form-text">{{ form.app_port.help_text }}</div>
-          {% if form.app_port.errors %}<div class="text-danger small">{{ form.app_port.errors }}</div>{% endif %}
         </div>
       </div>
     </div>
 
-    <!-- Credentials reminder -->
-    <div class="alert alert-info py-2 small">
-      <i class="bi bi-shield-lock-fill me-2"></i>
-      <strong>Credentials Jenkins requis :</strong> Configurez dans Jenkins →
-      <code>dockerhub-creds</code>, <code>aws-credentials</code>,
-      <code>aws-session-token</code>, <code>ec2-ssh-key</code>
-    </div>
-
-    <!-- Actions -->
     <div class="d-flex gap-2 mt-3">
       <button type="submit" class="btn fw-semibold px-4"
         style="background:#185FA5;color:#fff">
         <i class="bi bi-check2 me-2"></i>{{ action }} le projet
       </button>
-      <a href="{% url 'project_list' %}" class="btn btn-outline-secondary">
-        Annuler
-      </a>
+      <a href="{% url 'project_list' %}" class="btn btn-outline-secondary">Annuler</a>
     </div>
   </div>
 
-  <!-- Right column: Pipeline preview -->
-  <div class="col-lg-5">
-    <div class="card p-3 sticky-top" style="top:1rem">
-      <h6 class="fw-semibold mb-2">
-        <i class="bi bi-diagram-3 me-2" style="color:#185FA5"></i>
-        Aperçu du pipeline Jenkins
-      </h6>
-      <p class="text-muted small mb-2">Le Jenkinsfile sera généré automatiquement.</p>
-      <div style="background:#1a1b26;border-radius:8px;padding:10px;
-           font-family:'Courier New',monospace;font-size:.7rem;color:#cdd6f4;max-height:420px;overflow-y:auto">
-        <span style="color:#cba6f7">pipeline</span> {<br>
-        &nbsp;&nbsp;<span style="color:#89b4fa">agent</span> any<br>
-        &nbsp;&nbsp;<span style="color:#cba6f7">environment</span> {<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">IMAGE_NAME</span> = <span style="color:#f9e2af">'{{ request.POST.image_name|default:"user/image" }}'</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">AWS_REGION</span> = <span style="color:#f9e2af">'{{ request.POST.aws_region|default:"us-east-1" }}'</span><br>
-        &nbsp;&nbsp;}<br>
-        &nbsp;&nbsp;<span style="color:#cba6f7">stages</span> {<br>
-        {% for stage in stage_list %}
-        &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#cba6f7">stage</span>(<span style="color:#f9e2af">'{{ stage }}'</span>) { ... }<br>
-        {% endfor %}
-        &nbsp;&nbsp;}<br>
-        }
-      </div>
-      <div class="mt-3">
-        <p class="text-muted small mb-2 fw-semibold">Credentials Jenkins nécessaires :</p>
-        <div class="d-flex flex-wrap gap-1">
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>dockerhub-creds</span>
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>aws-credentials</span>
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>aws-session-token</span>
-          <span class="badge bg-light text-dark border"><i class="bi bi-key me-1"></i>ec2-ssh-key</span>
-        </div>
-      </div>
-    </div>
-  </div>
+  
+
 </div>
 </form>
+{% endblock %}
 
 <script>
-// Show/hide AWS fields based on cloud provider selection
-const providerSel = document.getElementById('id_cloud_provider');
-const awsFields   = document.getElementById('aws-fields');
-function toggleAws(){
-  awsFields.style.display = providerSel.value === 'AWS' ? '' : 'none';
+const projectType = document.getElementById('id_project_type');
+const buildTool   = document.getElementById('id_build_tool');
+const installPrev = document.getElementById('install-preview');
+const testPrev    = document.getElementById('test-preview');
+const btGroup     = document.getElementById('build-tool-group');
+
+const PREVIEWS = {
+  django:  {
+    install: 'python3 -m venv venv &amp;&amp; pip install -r requirements.txt',
+    test:    'venv/bin/python manage.py test',
+    bt: false
+  },
+  java: {
+    install: 'mvn dependency:resolve  (ou ./gradlew dependencies)',
+    test:    'mvn test  (ou ./gradlew test)',
+    bt: true
+  },
+  nodejs: {
+    install: 'npm install',
+    test:    'npm test',
+    bt: false
+  },
+  react: {
+    install: 'npm install',
+    test:    'npm run build',
+    bt: false
+  },
+  generic: {
+    install: 'echo No dependencies',
+    test:    'echo No tests',
+    bt: false
+  },
+};
+
+function updatePreview() {
+  const t = projectType?.value || 'django';
+  const info = PREVIEWS[t] || PREVIEWS.django;
+  if (installPrev) installPrev.innerHTML = info.install;
+  if (testPrev)    testPrev.innerHTML    = info.test;
+  if (btGroup)     btGroup.style.display = info.bt ? '' : 'none';
 }
-providerSel?.addEventListener('change', toggleAws);
-toggleAws();
+
+projectType?.addEventListener('change', updatePreview);
+updatePreview();
 </script>
-{% endblock %}

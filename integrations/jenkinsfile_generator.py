@@ -1,6 +1,6 @@
 """
 Generates the Jenkinsfile dynamically from Project fields.
-Uses string concatenation to avoid f-string/backslash conflicts.
+Uses project-specific credential IDs.
 """
 
 def generate_jenkinsfile(project) -> str:
@@ -19,10 +19,16 @@ def generate_jenkinsfile(project) -> str:
     k8s_svc    = project.k8s_service_file
     port       = str(project.app_port)
 
+    # ── Credential IDs — project-specific ─────────────────────────────
+    cred_dockerhub = project.cred_id_dockerhub    # mon-projet-django-dockerhub-creds
+    cred_aws       = project.cred_id_aws          # mon-projet-django-aws-credentials
+    cred_token     = project.cred_id_aws_token    # mon-projet-django-aws-session-token
+    cred_ssh       = project.cred_id_ssh          # mon-projet-django-ec2-ssh-key
+
     jf  = "pipeline {\n"
     jf += "    agent any\n\n"
     jf += "    environment {\n"
-    jf += "        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')\n"
+    jf += "        DOCKERHUB_CREDENTIALS = credentials('" + cred_dockerhub + "')\n"
     jf += "        IMAGE_NAME            = '" + image_name + "'\n"
     jf += "        AWS_REGION            = '" + region + "'\n"
     jf += "        AWS_ACCOUNT_ID        = '" + account + "'\n"
@@ -32,7 +38,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "    }\n\n"
     jf += "    stages {\n\n"
 
-    # ── Stage 1: Checkout ───────────────────────────────────────────────
+    # ── Stage 1: Checkout ─────────────────────────────────────────────
     jf += "        stage('Checkout') {\n"
     jf += "            steps {\n"
     jf += "                git branch: '" + branch + "',\n"
@@ -40,7 +46,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 2: Install Dependencies ───────────────────────────────────
+    # ── Stage 2: Install Dependencies ─────────────────────────────────
     jf += "        stage('Install Dependencies') {\n"
     jf += "            steps {\n"
     jf += "                sh '''\n"
@@ -52,7 +58,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 3: Run Tests ───────────────────────────────────────────────
+    # ── Stage 3: Run Tests ────────────────────────────────────────────
     jf += "        stage('Run Tests') {\n"
     jf += "            steps {\n"
     jf += "                sh '''\n"
@@ -62,14 +68,14 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 4: Build & Push Images ────────────────────────────────────
+    # ── Stage 4: Build & Push Images ──────────────────────────────────
     jf += "        stage('Build & Push Images') {\n"
     jf += "            steps {\n"
     jf += "                withCredentials([\n"
-    jf += "                    usernamePassword(credentialsId: 'aws-credentials',\n"
+    jf += "                    usernamePassword(credentialsId: '" + cred_aws + "',\n"
     jf += "                        usernameVariable: 'AWS_ACCESS_KEY_ID',\n"
     jf += "                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'),\n"
-    jf += "                    string(credentialsId: 'aws-session-token',\n"
+    jf += "                    string(credentialsId: '" + cred_token + "',\n"
     jf += "                        variable: 'AWS_SESSION_TOKEN')\n"
     jf += "                ]) {\n"
     jf += "                    sh \"\"\"\n"
@@ -106,16 +112,16 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 5: Provision Infra ─────────────────────────────────────────
+    # ── Stage 5: Provision Infra ───────────────────────────────────────
     jf += "        stage('Provision Infra') {\n"
     jf += "            steps {\n"
     jf += "                withCredentials([\n"
-    jf += "                    usernamePassword(credentialsId: 'aws-credentials',\n"
+    jf += "                    usernamePassword(credentialsId: '" + cred_aws + "',\n"
     jf += "                        usernameVariable: 'AWS_ACCESS_KEY_ID',\n"
     jf += "                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'),\n"
-    jf += "                    string(credentialsId: 'aws-session-token',\n"
+    jf += "                    string(credentialsId: '" + cred_token + "',\n"
     jf += "                        variable: 'AWS_SESSION_TOKEN'),\n"
-    jf += "                    sshUserPrivateKey(credentialsId: 'ec2-ssh-key',\n"
+    jf += "                    sshUserPrivateKey(credentialsId: '" + cred_ssh + "',\n"
     jf += "                        keyFileVariable: 'SSH_KEY')\n"
     jf += "                ]) {\n"
     jf += "                    sh \"\"\"\n"
@@ -159,7 +165,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "                                -o ConnectTimeout=10 ec2-user@\\$EC2_IP \\\n"
     jf += "                                \"sudo kubectl get nodes 2>/dev/null | grep Ready || echo NOT_READY\")\n"
     jf += "                            if echo \"\\$STATUS\" | grep -q 'Ready'; then\n"
-    jf += "                                echo \"k3s is ready: \\$STATUS\"; break\n"
+    jf += "                                echo \"k3s is ready\"; break\n"
     jf += "                            fi\n"
     jf += "                            echo \"Attempt \\$i/30 — waiting 10s...\"\n"
     jf += "                            sleep 10\n"
@@ -175,16 +181,16 @@ def generate_jenkinsfile(project) -> str:
     jf += "            }\n"
     jf += "        }\n\n"
 
-    # ── Stage 6: Deploy to k3s ───────────────────────────────────────────
+    # ── Stage 6: Deploy to k3s ────────────────────────────────────────
     jf += "        stage('Deploy to k3s') {\n"
     jf += "            steps {\n"
     jf += "                withCredentials([\n"
-    jf += "                    usernamePassword(credentialsId: 'aws-credentials',\n"
+    jf += "                    usernamePassword(credentialsId: '" + cred_aws + "',\n"
     jf += "                        usernameVariable: 'AWS_ACCESS_KEY_ID',\n"
     jf += "                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'),\n"
-    jf += "                    string(credentialsId: 'aws-session-token',\n"
+    jf += "                    string(credentialsId: '" + cred_token + "',\n"
     jf += "                        variable: 'AWS_SESSION_TOKEN'),\n"
-    jf += "                    sshUserPrivateKey(credentialsId: 'ec2-ssh-key',\n"
+    jf += "                    sshUserPrivateKey(credentialsId: '" + cred_ssh + "',\n"
     jf += "                        keyFileVariable: 'SSH_KEY')\n"
     jf += "                ]) {\n"
     jf += "                    sh \"\"\"\n"
@@ -216,7 +222,7 @@ def generate_jenkinsfile(project) -> str:
     jf += "                            \"sudo kubectl apply -f /home/ec2-user/deployment.yaml && \\\n"
     jf += "                             sudo kubectl apply -f /home/ec2-user/service.yaml\"\n\n"
     jf += "                        ssh -i \\${SSH_KEY} -o StrictHostKeyChecking=no ec2-user@\\$EC2_IP \\\n"
-    jf += "                            \"sudo kubectl rollout status deployment/" + job_name + " --timeout=180s\"\n\n"
+    jf += "                            \"sudo kubectl rollout status deployment/my-djanjo-app --timeout=180s\"\n\n"
     jf += "                        echo \"App deployed at http://\\$EC2_IP:" + port + "\"\n"
     jf += "                    \"\"\"\n"
     jf += "                }\n"
@@ -228,14 +234,26 @@ def generate_jenkinsfile(project) -> str:
     jf += "        }\n\n"
     jf += "    }\n\n"
 
-    # ── Post ──────────────────────────────────────────────────────────────
+    # ── Post ──────────────────────────────────────────────────────────
     jf += "    post {\n"
     jf += "        always {\n"
     jf += "            sh 'docker logout || true'\n"
     jf += "            cleanWs()\n"
     jf += "        }\n"
-    jf += "        success { echo 'Pipeline completed successfully.' }\n"
-    jf += "        failure { echo 'Pipeline failed.' }\n"
+    jf += "        success {\n"
+    jf += "            sh \"\"\"\n"
+    jf += "                curl -s -X POST http://172.17.0.1:8000/api/webhook/jenkins/ \\\n"
+    jf += "                    -H 'Content-Type: application/json' \\\n"
+    jf += "                    -d '{\"name\": \"" + job_name + "\", \"build\": {\"number\": '\\${BUILD_NUMBER}', \"phase\": \"FINALIZED\", \"status\": \"SUCCESS\"}}' || true\n"
+    jf += "            \"\"\"\n"
+    jf += "        }\n"
+    jf += "        failure {\n"
+    jf += "            sh \"\"\"\n"
+    jf += "                curl -s -X POST http://172.17.0.1:8000/api/webhook/jenkins/ \\\n"
+    jf += "                    -H 'Content-Type: application/json' \\\n"
+    jf += "                    -d '{\"name\": \"" + job_name + "\", \"build\": {\"number\": '\\${BUILD_NUMBER}', \"phase\": \"FINALIZED\", \"status\": \"FAILURE\"}}' || true\n"
+    jf += "            \"\"\"\n"
+    jf += "        }\n"
     jf += "    }\n"
     jf += "}\n"
 
