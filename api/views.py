@@ -226,37 +226,32 @@ def deployment_status(request, pk):
 
 from django.http import HttpResponse
 
-def metrics_view(request):
-    """
-    Expose Django metrics for Prometheus scraping.
-    URL: /metrics/
-    """
-    try:
-        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-        from prometheus_client import Gauge, Counter
+from django.http import HttpResponse
 
-        # Current platform stats
+def metrics_view(request):
+    try:
+        from prometheus_client import CollectorRegistry, Gauge, generate_latest, CONTENT_TYPE_LATEST
         from projects.models import Project
         from deployments.models import Deployment
 
-        # Total projects
-        g_projects = Gauge('cicd_projects_total',
-                           'Total number of projects')
-        g_projects.set(Project.objects.count())
+        # Crée un registry frais à chaque appel
+        registry = CollectorRegistry()
 
-        # Running deployments
-        g_running = Gauge('cicd_deployments_running',
-                          'Currently running deployments')
-        g_running.set(Deployment.objects.filter(status='RUNNING').count())
+        g1 = Gauge('cicd_projects_total', 'Total projects', registry=registry)
+        g1.set(Project.objects.count())
+
+        g2 = Gauge('cicd_deployments_running', 'Running deployments', registry=registry)
+        g2.set(Deployment.objects.filter(status='RUNNING').count())
+
+        g3 = Gauge('cicd_deployments_success', 'Successful deployments', registry=registry)
+        g3.set(Deployment.objects.filter(status='SUCCESS').count())
+
+        g4 = Gauge('cicd_deployments_failed', 'Failed deployments', registry=registry)
+        g4.set(Deployment.objects.filter(status='FAILED').count())
 
         return HttpResponse(
-            generate_latest(),
+            generate_latest(registry),
             content_type=CONTENT_TYPE_LATEST)
-    except ImportError:
-        return HttpResponse(
-            "# prometheus_client not installed\n",
-            content_type="text/plain")
+
     except Exception as e:
-        return HttpResponse(
-            f"# Error: {e}\n",
-            content_type="text/plain")
+        return HttpResponse(f"# Error: {e}\n", content_type="text/plain")

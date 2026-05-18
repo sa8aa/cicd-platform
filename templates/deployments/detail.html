@@ -16,18 +16,23 @@
   </form>
   {% endif %}
   {% if deployment.jenkins_build_url %}
-  <a href="{{ deployment.jenkins_build_url }}" target="_blank" class="btn btn-sm btn-outline-primary ms-auto">
+  <a href="{{ deployment.jenkins_build_url }}" target="_blank"
+     class="btn btn-sm btn-outline-primary ms-auto">
     <i class="bi bi-box-arrow-up-right me-1"></i>Voir dans Jenkins
   </a>
   {% endif %}
 </div>
 
 <div class="row g-3 mb-3">
+  <!-- Info -->
   <div class="col-md-4">
     <div class="card p-3 h-100">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-info-circle me-2" style="color:#185FA5"></i>Informations</h6>
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-info-circle me-2" style="color:#185FA5"></i>Informations
+      </h6>
       <div class="mb-2 text-center">
-        <span class="badge bs-{{ deployment.status }} px-3 py-2" style="font-size:.9rem">{{ deployment.status }}</span>
+        <span id="badge-status" class="badge bs-{{ deployment.status }} px-3 py-2"
+              style="font-size:.95rem">{{ deployment.status }}</span>
       </div>
       <table class="table table-sm table-borderless mt-2 mb-0">
         <tr><th class="text-muted" style="font-size:.8rem;width:110px">Projet</th>
@@ -39,7 +44,8 @@
         <tr><th class="text-muted" style="font-size:.8rem">Build Jenkins</th>
             <td class="small">#{{ deployment.jenkins_build_number|default:"–" }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Durée</th>
-            <td class="small fw-semibold">{{ deployment.duration|default:"En cours..." }}</td></tr>
+            <td class="small fw-semibold" id="info-duration">
+              {{ deployment.duration|default:"En cours..." }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Démarré</th>
             <td class="small">{{ deployment.started_at|date:"d/m/Y H:i:s" }}</td></tr>
         <tr><th class="text-muted" style="font-size:.8rem">Terminé</th>
@@ -48,64 +54,86 @@
             <td class="small">{{ deployment.triggered_by.username|default:"auto" }}</td></tr>
       </table>
       {% if deployment.error_message %}
-      <div class="alert alert-danger mt-2 py-2 small"><strong>Erreur:</strong> {{ deployment.error_message }}</div>
+      <div class="alert alert-danger mt-2 py-2 small">
+        <strong>Erreur:</strong> {{ deployment.error_message }}
+      </div>
       {% endif %}
     </div>
   </div>
 
+  <!-- Stages -->
   <div class="col-md-4">
     <div class="card p-3 h-100">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-diagram-3 me-2" style="color:#185FA5"></i>Stages Jenkins</h6>
-      {% for s in stages %}
-      <div class="stage-row">
-        <div class="stage-icon {{ s.status }}">
-          {% if s.status == 'SUCCESS' %}<i class="bi bi-check2"></i>
-          {% elif s.status == 'FAILED' %}<i class="bi bi-x"></i>
-          {% elif s.status == 'RUNNING' %}<i class="bi bi-arrow-repeat"></i>
-          {% else %}<i class="bi bi-clock"></i>{% endif %}
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-diagram-3 me-2" style="color:#185FA5"></i>Stages Jenkins
+      </h6>
+      <div id="stages-container">
+        {% for s in stages %}
+        <div class="stage-row">
+          <div class="stage-icon {{ s.status }}">
+            {% if s.status == 'SUCCESS' %}<i class="bi bi-check2"></i>
+            {% elif s.status == 'FAILED' %}<i class="bi bi-x"></i>
+            {% elif s.status == 'RUNNING' %}<i class="bi bi-arrow-repeat"></i>
+            {% elif s.status == 'SKIPPED' %}<i class="bi bi-skip-forward"></i>
+            {% else %}<i class="bi bi-clock"></i>{% endif %}
+          </div>
+          <div class="flex-grow-1">
+            <div class="small fw-semibold">{{ s.name }}</div>
+            <div class="text-muted" style="font-size:.72rem">{{ s.duration|default:"–" }}</div>
+          </div>
+          <span class="badge bs-{{ s.status }}" style="font-size:.65rem">{{ s.status }}</span>
         </div>
-        <div class="flex-grow-1">
-          <div class="small fw-semibold">{{ s.name }}</div>
-          <div class="text-muted" style="font-size:.72rem">{{ s.duration|default:"–" }}</div>
-        </div>
-        <span class="badge bs-{{ s.status }}" style="font-size:.65rem">{{ s.status }}</span>
+        {% empty %}
+        <p class="text-muted small" id="stages-waiting">En attente du démarrage...</p>
+        {% endfor %}
       </div>
-      {% empty %}
-      <p class="text-muted small mt-2">En attente du webhook Jenkins...</p>
-      {% endfor %}
     </div>
   </div>
 
+  <!-- Live status -->
   <div class="col-md-4">
     <div class="card p-3 h-100">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-activity me-2" style="color:#185FA5"></i>Statut live</h6>
-      {% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
-      <div class="text-center py-3">
-        <div class="spinner-border text-primary mb-3"></div>
-        <p class="text-muted small">Pipeline en cours...<br>Rafraîchissement dans <span id="timer">5</span>s</p>
-      </div>
-      {% elif deployment.status == 'SUCCESS' %}
-      <div class="text-center py-3">
-        <i class="bi bi-check-circle-fill fs-1" style="color:#0F6E56"></i>
-        <p class="mt-2 fw-semibold" style="color:#0F6E56">Déploiement réussi !</p>
-        {% if deployment.project.app_port %}
-        <p class="text-muted small">Port applicatif: <code>{{ deployment.project.app_port }}</code></p>
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-activity me-2" style="color:#185FA5"></i>Statut live
+      </h6>
+      <div id="live-card-content">
+        {% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
+        <div class="text-center py-3" id="live-running">
+          <div class="spinner-border text-primary mb-3"></div>
+          <p class="text-muted small mb-1">Pipeline en cours...</p>
+          <p class="text-muted small">
+            <span id="log-count">0</span> lignes reçues
+          </p>
+        </div>
+        {% elif deployment.status == 'SUCCESS' %}
+        <div class="text-center py-3">
+          <i class="bi bi-check-circle-fill fs-1" style="color:#0F6E56"></i>
+          <p class="mt-2 fw-semibold" style="color:#0F6E56">Déploiement réussi !</p>
+          <p class="text-muted small">Durée: {{ deployment.duration }}</p>
+        </div>
+        {% else %}
+        <div class="text-center py-3">
+          <i class="bi bi-x-circle-fill fs-1" style="color:#A32D2D"></i>
+          <p class="mt-2 fw-semibold" style="color:#A32D2D">{{ deployment.status }}</p>
+        </div>
         {% endif %}
       </div>
-      {% else %}
-      <div class="text-center py-3">
-        <i class="bi bi-x-circle-fill fs-1" style="color:#A32D2D"></i>
-        <p class="mt-2 fw-semibold" style="color:#A32D2D">{{ deployment.status }}</p>
-      </div>
-      {% endif %}
     </div>
   </div>
 </div>
 
-<!-- Logs -->
+<!-- Console -->
 <div class="card p-3">
   <div class="d-flex justify-content-between align-items-center mb-2">
-    <h6 class="fw-semibold mb-0"><i class="bi bi-terminal me-2" style="color:#185FA5"></i>Console</h6>
+    <h6 class="fw-semibold mb-0">
+      <i class="bi bi-terminal me-2" style="color:#185FA5"></i>
+      Console Jenkins
+      {% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
+      <span class="badge bg-success ms-2" style="font-size:.65rem;animation:pulse 1.5s infinite">
+        LIVE
+      </span>
+      {% endif %}
+    </h6>
     <div class="btn-group btn-group-sm" id="logFilter">
       <button class="btn btn-outline-secondary active" data-level="ALL">Tous</button>
       <button class="btn btn-outline-secondary" data-level="INFO">INFO</button>
@@ -121,29 +149,139 @@
       <span class="log-lv">[{{ log.level }}]</span>{{ log.message }}
     </div>
     {% empty %}
-    <div class="log-line log-INFO">En attente des logs Jenkins...</div>
+    <div class="log-line log-INFO" id="log-waiting">
+      En attente des logs Jenkins...
+    </div>
     {% endfor %}
   </div>
 </div>
+
 {% endblock %}
+
 {% block extra_js %}
 <script>
-document.querySelectorAll('#logFilter button').forEach(btn=>{
-  btn.addEventListener('click',function(){
-    document.querySelectorAll('#logFilter button').forEach(b=>b.classList.remove('active'));
+// ── Log filter ────────────────────────────────────────────────────────────────
+document.querySelectorAll('#logFilter button').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#logFilter button').forEach(b => b.classList.remove('active'));
     this.classList.add('active');
-    const lv=this.dataset.level;
-    document.querySelectorAll('.log-line').forEach(l=>{
-      l.style.display=(lv==='ALL'||l.dataset.level===lv)?'':'none';
+    const lv = this.dataset.level;
+    document.querySelectorAll('.log-line').forEach(l => {
+      l.style.display = (lv === 'ALL' || l.dataset.level === lv) ? '' : 'none';
     });
   });
 });
-const lb=document.getElementById('logBox');
-if(lb) lb.scrollTop=lb.scrollHeight;
+
+const logBox = document.getElementById('logBox');
+if (logBox) logBox.scrollTop = logBox.scrollHeight;
+
+// ── Stage renderer ───────────────────────────────────────────────────────────
+const STATUS_COLORS = {
+  SUCCESS: '#0F6E56', FAILED: '#A32D2D', RUNNING: '#185FA5',
+  PENDING: '#ccc',    SKIPPED: '#888',
+};
+const STATUS_ICONS = {
+  SUCCESS: 'check2', FAILED: 'x', RUNNING: 'arrow-repeat',
+  PENDING: 'clock',  SKIPPED: 'skip-forward',
+};
+
+function updateStages(stages) {
+  const container = document.getElementById('stages-container');
+  if (!container || !stages.length) return;
+  container.innerHTML = '';
+  stages.forEach(s => {
+    const color = STATUS_COLORS[s.status] || '#ccc';
+    container.innerHTML += `
+      <div class="stage-row">
+        <div class="stage-icon ${s.status}" style="background:${color}">
+          <i class="bi bi-${STATUS_ICONS[s.status] || 'clock'}"></i>
+        </div>
+        <div class="flex-grow-1">
+          <div class="small fw-semibold">${s.name}</div>
+          <div class="text-muted" style="font-size:.72rem">${s.duration || '...'}</div>
+        </div>
+        <span class="badge" style="background:${color};font-size:.65rem">${s.status}</span>
+      </div>`;
+  });
+}
+
+// ── Append log line ──────────────────────────────────────────────────────────
+let logCount = 0;
+function appendLog(message, cssClass, level) {
+  const waiting = document.getElementById('log-waiting');
+  if (waiting) waiting.remove();
+
+  const div = document.createElement('div');
+  div.className = `log-line ${cssClass}`;
+  div.dataset.level = level;
+  div.innerHTML = `<span class="log-ts">${new Date().toLocaleTimeString()}</span>
+                   <span class="log-lv">[${level}]</span>${message}`;
+  logBox.appendChild(div);
+  logBox.scrollTop = logBox.scrollHeight;
+
+  logCount++;
+  const counter = document.getElementById('log-count');
+  if (counter) counter.textContent = logCount;
+
+  // Apply active filter
+  const activeFilter = document.querySelector('#logFilter button.active');
+  if (activeFilter && activeFilter.dataset.level !== 'ALL') {
+    div.style.display = div.dataset.level === activeFilter.dataset.level ? '' : 'none';
+  }
+}
+
+// ── Update status when done ──────────────────────────────────────────────────
+function onDone(status, duration) {
+  const badge = document.getElementById('badge-status');
+  if (badge) {
+    badge.textContent = status;
+    badge.style.background = STATUS_COLORS[status] || '#888';
+  }
+  const dur = document.getElementById('info-duration');
+  if (dur && duration) dur.textContent = duration;
+
+  const liveRunning = document.getElementById('live-running');
+  if (liveRunning) {
+    if (status === 'SUCCESS') {
+      liveRunning.innerHTML = `
+        <i class="bi bi-check-circle-fill fs-1" style="color:#0F6E56"></i>
+        <p class="mt-2 fw-semibold" style="color:#0F6E56">Déploiement réussi !</p>
+        <p class="text-muted small">Durée: ${duration}</p>`;
+    } else {
+      liveRunning.innerHTML = `
+        <i class="bi bi-x-circle-fill fs-1" style="color:#A32D2D"></i>
+        <p class="mt-2 fw-semibold" style="color:#A32D2D">${status}</p>`;
+    }
+  }
+}
+
+// ── SSE Connection ───────────────────────────────────────────────────────────
 {% if deployment.status == 'RUNNING' or deployment.status == 'PENDING' %}
-let t=5;
-const ti=document.getElementById('timer');
-setInterval(()=>{t--;if(ti)ti.textContent=t;if(t<=0)location.reload();},1000);
+const depId = {{ deployment.pk }};
+const evtSource = new EventSource(`/deployments/${depId}/stream/`);
+
+evtSource.addEventListener('log', e => {
+  const data = JSON.parse(e.data);
+  appendLog(data.message, data.css_class, data.level);
+});
+
+evtSource.addEventListener('stages', e => {
+  const data = JSON.parse(e.data);
+  updateStages(data.stages);
+});
+
+evtSource.addEventListener('done', e => {
+  const data = JSON.parse(e.data);
+  evtSource.close();
+  onDone(data.status, data.duration);
+});
+
+evtSource.addEventListener('ping', () => {});  // keepalive
+
+evtSource.onerror = () => {
+  console.log('SSE connection closed');
+  evtSource.close();
+};
 {% endif %}
 </script>
 {% endblock %}

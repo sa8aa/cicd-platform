@@ -45,15 +45,12 @@ class JenkinsClient:
         return r.status_code == 200
 
     def _build_config_xml(self, jenkinsfile: str, description: str = '') -> bytes:
-        # Clean non-ASCII characters that break XML
         jenkinsfile = jenkinsfile.replace('—', '-').replace('–', '-')
-
         safe_desc = (description
                      .replace('&', '&amp;')
                      .replace('<', '&lt;')
                      .replace('>', '&gt;')
                      .replace('"', '&quot;'))
-
         config = (
             "<?xml version='1.1' encoding='UTF-8'?>\n"
             "<flow-definition plugin=\"workflow-job\">\n"
@@ -142,12 +139,12 @@ class JenkinsClient:
                 data = r.json()
                 stages = []
                 status_map = {
-                    'SUCCESS':             'SUCCESS',
-                    'FAILED':              'FAILED',
-                    'FAILURE':             'FAILED',
-                    'IN_PROGRESS':         'RUNNING',
-                    'NOT_EXECUTED':        'SKIPPED',
-                    'PAUSED_PENDING_INPUT':'RUNNING',
+                    'SUCCESS':              'SUCCESS',
+                    'FAILED':               'FAILED',
+                    'FAILURE':              'FAILED',
+                    'IN_PROGRESS':          'RUNNING',
+                    'NOT_EXECUTED':         'SKIPPED',
+                    'PAUSED_PENDING_INPUT': 'RUNNING',
                 }
                 for s in data.get('stages', []):
                     duration_ms = s.get('durationMillis', 0)
@@ -160,6 +157,29 @@ class JenkinsClient:
         except Exception as e:
             logger.error(f"Jenkins get_build_stages error: {e}")
         return []
+
+    def get_progressive_console(self, job_name: str,
+                                 build_number: int,
+                                 start: int = 0) -> dict:
+        """
+        Uses Jenkins progressiveText API to get new log lines only.
+        Returns: {text, next_offset, more}
+        """
+        try:
+            r = requests.get(
+                f"{self.url}/job/{job_name}/{build_number}"
+                f"/logText/progressiveText?start={start}",
+                auth=self.auth, timeout=10)
+            if r.status_code == 200:
+                return {
+                    'text':        r.text,
+                    'next_offset': int(r.headers.get('X-Text-Size', start)),
+                    'more':        r.headers.get(
+                        'X-More-Data', 'false').lower() == 'true',
+                }
+        except Exception as e:
+            logger.error(f"Progressive console error: {e}")
+        return {'text': '', 'next_offset': start, 'more': False}
 
     def get_build_info(self, job_name: str, build_number: int) -> dict:
         try:
@@ -199,4 +219,4 @@ class JenkinsClient:
                 timeout=5)
             return r.status_code in (200, 302)
         except Exception:
-            return False
+            return False      

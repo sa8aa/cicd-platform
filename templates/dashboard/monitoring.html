@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Monitoring{% endblock %}
+{% block page_title %}Monitoring & Observabilité{% endblock %}
+{% block content %}
+
+<!-- Stats cards -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <p class="text-muted small mb-1">Total Déploiements</p>
+          <h3 class="fw-bold mb-0">{{ total_deployments }}</h3>
+        </div>
+        <i class="bi bi-rocket-takeoff fs-1 text-primary opacity-25"></i>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card s p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <p class="text-muted small mb-1">Taux de succès</p>
+          <h3 class="fw-bold mb-0" style="color:#0F6E56">{{ success_rate }}%</h3>
+        </div>
+        <i class="bi bi-check2-circle fs-1 opacity-25" style="color:#0F6E56"></i>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card d p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <p class="text-muted small mb-1">Échecs</p>
+          <h3 class="fw-bold mb-0" style="color:#A32D2D">{{ failed }}</h3>
+        </div>
+        <i class="bi bi-x-circle fs-1 opacity-25" style="color:#A32D2D"></i>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card stat-card w p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <p class="text-muted small mb-1">En cours</p>
+          <h3 class="fw-bold mb-0" style="color:#BA7517">{{ running }}</h3>
+        </div>
+        <i class="bi bi-arrow-repeat fs-1 opacity-25" style="color:#BA7517"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Grafana Links -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-semibold mb-0">
+          <i class="bi bi-graph-up me-2" style="color:#185FA5"></i>
+          Grafana Dashboards
+        </h6>
+        <div class="d-flex gap-2">
+          <a href="{{ grafana_url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Ouvrir Grafana
+          </a>
+          <a href="{{ prometheus_url }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Prometheus
+          </a>
+        </div>
+      </div>
+
+      <!-- Grafana iframe -->
+      <div style="position:relative;width:100%;height:600px;border-radius:8px;overflow:hidden;border:1px solid #ddd;">
+        <iframe
+          src="{{ grafana_dashboard_url }}"
+          width="100%"
+          height="100%"
+          frameborder="0"
+          style="border-radius:8px;">
+        </iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Prometheus metrics raw -->
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-activity me-2" style="color:#993C1D"></i>
+        Métriques Django en temps réel
+      </h6>
+      <div style="background:#1a1b26;border-radius:8px;padding:12px;
+           font-family:'Courier New',monospace;font-size:.78rem;color:#cdd6f4;
+           max-height:300px;overflow-y:auto;">
+        {% for metric in metrics %}
+        <div style="padding:2px 0;{% if '#' in metric %}color:#6c7086;{% elif 'cicd_' in metric %}color:#a6e3a1;{% endif %}">
+          {{ metric }}
+        </div>
+        {% endfor %}
+      </div>
+      <a href="/metrics/" target="_blank" class="btn btn-sm btn-outline-secondary mt-2">
+        <i class="bi bi-arrow-up-right me-1"></i>Voir /metrics/ complet
+      </a>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3">
+        <i class="bi bi-clock-history me-2" style="color:#185FA5"></i>
+        Derniers déploiements
+      </h6>
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>Projet</th><th>Statut</th><th>Durée</th><th>Date</th></tr>
+        </thead>
+        <tbody>
+          {% for d in recent_deployments %}
+          <tr>
+            <td class="small fw-semibold">{{ d.project.name }}</td>
+            <td><span class="badge bs-{{ d.status }}">{{ d.status }}</span></td>
+            <td class="small text-muted">{{ d.duration|default:"–" }}</td>
+            <td class="small text-muted">{{ d.started_at|date:"d/m H:i" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

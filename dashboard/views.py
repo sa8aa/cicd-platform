@@ -78,3 +78,51 @@ def login_view(request):
 def logout_view(request):
     logout(request)
     return redirect('login')
+
+
+@login_required
+def monitoring(request):
+    from django.conf import settings
+    from deployments.models import Deployment
+    from projects.models import Project
+    import urllib.request
+
+    # Stats
+    total = Deployment.objects.count()
+    success = Deployment.objects.filter(status='SUCCESS').count()
+    failed  = Deployment.objects.filter(status='FAILED').count()
+    running = Deployment.objects.filter(status='RUNNING').count()
+    success_rate = round((success / total * 100), 1) if total else 0
+
+    recent_deployments = Deployment.objects.select_related(
+        'project').order_by('-started_at')[:8]
+
+    # Fetch raw metrics from Django /metrics/
+    metrics = []
+    try:
+        req = urllib.request.urlopen(
+            'http://localhost:8000/metrics/', timeout=2)
+        raw = req.read().decode('utf-8')
+        metrics = [line for line in raw.split('\n')
+                   if line.strip() and 'cicd_' in line or line.startswith('#')][:30]
+    except Exception:
+        metrics = ['# Métriques non disponibles']
+
+    # Grafana URLs
+    grafana_url = getattr(settings, 'GRAFANA_URL', 'http://localhost:3000')
+    grafana_dashboard_url = (
+        f"{grafana_url}/d/cicd-platform/ci-cd-platform-deployments"
+        f"?orgId=1&refresh=5s&kiosk=tv")
+    prometheus_url = 'http://localhost:9090'
+
+    return render(request, 'dashboard/monitoring.html', {
+        'total_deployments': total,
+        'success_rate': success_rate,
+        'failed': failed,
+        'running': running,
+        'recent_deployments': recent_deployments,
+        'metrics': metrics,
+        'grafana_url': grafana_url,
+        'grafana_dashboard_url': grafana_dashboard_url,
+        'prometheus_url': prometheus_url,
+    })
